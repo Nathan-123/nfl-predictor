@@ -1,0 +1,5 @@
+nfl_data_py
+pandas
+pyarrow
+tqdm
+pytest

@@ -1,0 +1,17 @@
+# Data (regeneratable via the pipeline) -- leading slash so this only
+# matches the root-level cache dir, not src/nfl_predictor/data/
+/data/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+
+# Editors
+.vscode/
+.idea/
