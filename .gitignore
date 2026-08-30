@@ -1,6 +1,8 @@
-# Data (regeneratable via the pipeline) -- leading slash so this only
-# matches the root-level cache dir, not src/nfl_predictor/data/
-/data/
+# Data regeneratable via the pipeline -- ignore the cache dirs specifically
+# (not /data/ wholesale) so /data/manual/ (small, hand-curated, worth
+# committing) stays tracked.
+/data/raw/
+/data/processed/
 
 # Python
 __pycache__/

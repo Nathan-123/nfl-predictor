@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from tqdm import tqdm
 
-from nfl_predictor.config import DATA_DIR, MANIFEST_PATH, MIN_SEASON, PARTITIONED_DATASETS
+from nfl_predictor.config import DATA_DIR, EXTENDED_START_SEASON, MANIFEST_PATH, MIN_SEASON, PARTITIONED_DATASETS
 from nfl_predictor.data.fetch import DATASETS
 
 log = logging.getLogger(__name__)
@@ -92,11 +92,11 @@ def run(
     for name in tqdm(names, desc="Fetching datasets"):
         fetch_fn = DATASETS[name]
 
-        effective_start = start_season
+        effective_start = min(start_season, EXTENDED_START_SEASON.get(name, start_season))
         clipped_from = None
         min_season = MIN_SEASON.get(name)
-        if min_season and start_season < min_season:
-            clipped_from = start_season
+        if min_season and effective_start < min_season:
+            clipped_from = effective_start
             effective_start = min_season
 
         if effective_start > end_season:

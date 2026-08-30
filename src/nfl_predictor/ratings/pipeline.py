@@ -79,6 +79,7 @@ def run(
     k: float = DEFAULT_K,
     hfa: float | None = None,
     regress_frac: float = 1 / 3,
+    season_adjustments: dict[tuple[int, str], float] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, BacktestSummary]:
     """Replay every played game from start_season..end_season in order,
     tracking Elo ratings. Returns (game_log, current_ratings, backtest).
@@ -88,6 +89,11 @@ def run(
     hardcoding a constant -- note this means the estimate has "seen" the
     full sample rather than being purely out-of-sample, a standard practical
     simplification for this stage.
+
+    season_adjustments: optional {(season, team): elo_points} applied on top
+    of the regular regress_to_mean shift at each season boundary -- see
+    ratings/adjustment.py, which fits these from offseason signals
+    (coaching change, QB continuity, draft capital).
     """
     games = _load_played_games(start_season, end_season)
     if games.empty:
@@ -103,7 +109,12 @@ def run(
 
     for game in games.itertuples(index=False):
         if current_season is not None and game.season != current_season:
-            ratings = {team: regress_to_mean(r, DEFAULT_MEAN, regress_frac) for team, r in ratings.items()}
+            new_season = game.season
+            ratings = {
+                team: regress_to_mean(r, DEFAULT_MEAN, regress_frac)
+                + (season_adjustments or {}).get((new_season, team), 0.0)
+                for team, r in ratings.items()
+            }
         current_season = game.season
 
         elo_home = ratings.setdefault(game.home_team, DEFAULT_MEAN)
