@@ -1,5 +1,6 @@
 nfl_data_py
 pandas
+numpy
 pyarrow
 tqdm
 pytest

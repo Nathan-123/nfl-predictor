@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data" / "raw"
 MANIFEST_PATH = DATA_DIR / "manifest.json"
+PROCESSED_DIR = ROOT_DIR / "data" / "processed"
 
 # First season of the 17-game regular season (2021+). Earlier seasons used a
 # 16-game schedule, which skews any rate/total stat computed across a full

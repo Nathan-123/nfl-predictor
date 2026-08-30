@@ -1,6 +1,10 @@
 """Network smoke test: pulls a small, cheap season range for every dataset
 and checks each lands as a non-empty, sane-looking DataFrame. Requires
 internet access (hits nfl_data_py's hosted data files).
+
+All fetched output is redirected to a throwaway tmp dir for the duration of
+this module (see isolated_data_dir below) -- these tests must never write
+into the real data/raw/ cache.
 """
 
 import sys
@@ -11,7 +15,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from nfl_predictor.data.pipeline import run
+from nfl_predictor.config import PARTITIONED_DATASETS
+from nfl_predictor.data import pipeline
 
 SMOKE_START, SMOKE_END = 2023, 2024
 
@@ -35,18 +40,33 @@ EXPECTED_COLUMNS = {
 KNOWN_EMPTY_OK = {"win_totals"}
 
 
+@pytest.fixture(scope="module", autouse=True)
+def isolated_data_dir(tmp_path_factory):
+    """Redirect pipeline.DATA_DIR/MANIFEST_PATH to a throwaway tmp dir for
+    this whole module. pipeline.py did `from nfl_predictor.config import
+    DATA_DIR`, so patching config.DATA_DIR alone would not affect the name
+    already bound inside pipeline.py -- patch pipeline's own attributes.
+    """
+    tmp_dir = tmp_path_factory.mktemp("data_raw")
+    original_data_dir, original_manifest_path = pipeline.DATA_DIR, pipeline.MANIFEST_PATH
+    pipeline.DATA_DIR = tmp_dir
+    pipeline.MANIFEST_PATH = tmp_dir / "manifest.json"
+    try:
+        yield
+    finally:
+        pipeline.DATA_DIR, pipeline.MANIFEST_PATH = original_data_dir, original_manifest_path
+
+
 @pytest.fixture(scope="module")
 def results():
-    return {r.name: r for r in run(SMOKE_START, SMOKE_END, list(EXPECTED_COLUMNS.keys()))}
+    return {r.name: r for r in pipeline.run(SMOKE_START, SMOKE_END, list(EXPECTED_COLUMNS.keys()))}
 
 
 def _read_dataset(name: str) -> pd.DataFrame:
-    from nfl_predictor.config import DATA_DIR, PARTITIONED_DATASETS
-
     if name in PARTITIONED_DATASETS:
-        parts = sorted((DATA_DIR / name).glob("*.parquet"))
+        parts = sorted((pipeline.DATA_DIR / name).glob("*.parquet"))
         return pd.concat([pd.read_parquet(p) for p in parts], ignore_index=True)
-    return pd.read_parquet(DATA_DIR / f"{name}.parquet")
+    return pd.read_parquet(pipeline.DATA_DIR / f"{name}.parquet")
 
 
 @pytest.mark.parametrize("name", EXPECTED_COLUMNS.keys())
@@ -73,17 +93,15 @@ def test_win_totals_has_data_for_a_known_good_range():
     # win_totals coverage is inconsistent for recent seasons (see KNOWN_EMPTY_OK
     # above); confirm the fetch path itself works against a range that reliably
     # has data upstream.
-    [result] = run(2018, 2019, ["win_totals"])
+    [result] = pipeline.run(2018, 2019, ["win_totals"])
     assert result.status == "ok", result.error
     df = _read_dataset("win_totals")
     assert not (EXPECTED_COLUMNS["win_totals"] - set(df.columns))
 
 
 def test_pbp_is_partitioned_by_season(results):
-    from nfl_predictor.config import DATA_DIR
-
     assert results["pbp"].status == "ok"
-    season_files = sorted(p.name for p in (DATA_DIR / "pbp").glob("*.parquet"))
+    season_files = sorted(p.name for p in (pipeline.DATA_DIR / "pbp").glob("*.parquet"))
     assert season_files == ["2023.parquet", "2024.parquet"]
 
 
