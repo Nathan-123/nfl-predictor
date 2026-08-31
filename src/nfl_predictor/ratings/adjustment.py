@@ -17,6 +17,12 @@ import pandas as pd
 
 FEATURE_COLS = ["coaching_change", "qb_value_delta", "draft_capital_added", "skill_value_delta"]
 
+# When fitting on a widened regression window, discard transitions from the
+# first few seasons of that window's Elo run -- ratings need a few seasons
+# to move off the synthetic 1500 starting point before a "rating_change" is
+# a meaningful target rather than warm-up noise.
+ELO_WARMUP_SEASONS = 4
+
 
 @dataclass
 class FittedModel:
@@ -123,20 +129,47 @@ class AdjustedEloPipeline:
     max_season: int
 
 
-def fit_adjusted_elo_pipeline(start_season: int) -> AdjustedEloPipeline:
+def fit_adjusted_elo_pipeline(start_season: int, regression_start_season: int | None = None) -> AdjustedEloPipeline:
     """The complete Stage 1 -> Stage 1b pipeline in one call: baseline Elo,
     offseason features, LOSO-fit adjustment model, and Elo re-run with those
     adjustments applied. Shared by every script that needs "the current
     adjusted ratings" (run_offseason_adjustment.py, the season simulator)
-    so they can't silently drift from each other."""
+    so they can't silently drift from each other.
+
+    start_season: the PRODUCTION Elo engine's start -- current ratings,
+    backtest numbers, and what Stage 3 consumes are all anchored here and
+    unaffected by regression_start_season.
+
+    regression_start_season: if given and earlier than start_season, the
+    offseason-adjustment model is instead fit on a WIDER window of season-
+    transitions -- more independent trials to fit on -- via a second,
+    separate Elo run used only to generate (season, team, rating_change)
+    targets (see ratings.pipeline.run). The first ELO_WARMUP_SEASONS of
+    that wider run are dropped before fitting (ratings need time to move
+    off the synthetic 1500 start). The resulting season_adjustments dict
+    naturally only gets *used* for whichever (season, team) keys the
+    production run's season boundaries look up, so extra pre-start_season
+    entries in it are harmless.
+    """
     from nfl_predictor.ratings.offseason_features import build_offseason_features
     from nfl_predictor.ratings.pipeline import run as run_elo
 
     baseline_log, _, baseline_summary = run_elo(start_season=start_season)
     max_season = int(baseline_log["season"].max())
-    features = build_offseason_features(start_season, max_season + 1)
 
-    full_model, loso_df = fit_with_loso_cv(features, baseline_log)
+    regression_start = regression_start_season or start_season
+    widened = regression_start_season is not None and regression_start != start_season
+    regression_log = run_elo(start_season=regression_start)[0] if widened else baseline_log
+
+    features = build_offseason_features(regression_start, max_season + 1)
+    if widened:
+        # Only the widened path needs a warm-up discard -- build_offseason_features
+        # already excludes the very first (no-prior-season) row on its own, which
+        # is all the non-widened path ever relied on.
+        trusted_from = regression_start + ELO_WARMUP_SEASONS
+        features = features[features["season"] >= trusted_from].reset_index(drop=True)
+
+    full_model, loso_df = fit_with_loso_cv(features, regression_log)
     season_adjustments = season_adjustments_from_loso(loso_df)
 
     adjusted_log, adjusted_ratings, adjusted_summary = run_elo(

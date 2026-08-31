@@ -16,7 +16,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from nfl_predictor.config import DEFAULT_START_SEASON, PROCESSED_DIR
+from nfl_predictor.config import DEFAULT_REGRESSION_START_SEASON, DEFAULT_START_SEASON, PROCESSED_DIR
 from nfl_predictor.ratings.adjustment import fit_adjusted_elo_pipeline, project_upcoming_season
 
 ADJUSTED_GAME_LOG_PATH = PROCESSED_DIR / "elo_adjusted_game_log.parquet"
@@ -26,6 +26,13 @@ ADJUSTED_CURRENT_RATINGS_PATH = PROCESSED_DIR / "elo_adjusted_current_ratings.pa
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fit and backtest the offseason Elo adjustment layer.")
     parser.add_argument("--start-season", type=int, default=DEFAULT_START_SEASON)
+    parser.add_argument(
+        "--regression-start-season",
+        type=int,
+        default=DEFAULT_REGRESSION_START_SEASON,
+        help="Fit the adjustment model on transitions from this season onward (wider than --start-season) "
+        "for more independent training data; the production Elo engine/backtest still use --start-season.",
+    )
     return parser.parse_args()
 
 
@@ -33,7 +40,7 @@ def main() -> None:
     args = parse_args()
 
     print("Fitting Elo (Stage 1) + offseason adjustment (Stage 1b)...")
-    pipeline = fit_adjusted_elo_pipeline(args.start_season)
+    pipeline = fit_adjusted_elo_pipeline(args.start_season, regression_start_season=args.regression_start_season)
 
     print(f"\nFitted on {pipeline.full_model.n_rows} team-season transitions ({sorted(pipeline.loso_df['season'].unique())}):")
     for name, coef in pipeline.full_model.coefficients.items():

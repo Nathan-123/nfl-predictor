@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from nfl_predictor.config import DEFAULT_START_SEASON, PROCESSED_DIR
+from nfl_predictor.config import DEFAULT_REGRESSION_START_SEASON, DEFAULT_START_SEASON, PROCESSED_DIR
 from nfl_predictor.ratings.adjustment import fit_adjusted_elo_pipeline, project_upcoming_season
 from nfl_predictor.ratings.elo import DEFAULT_K
 from nfl_predictor.simulation.season import (
@@ -31,6 +31,7 @@ SUMMARY_PATH = PROCESSED_DIR / "season_simulation_summary.parquet"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Monte Carlo simulate the upcoming NFL regular season.")
     parser.add_argument("--start-season", type=int, default=DEFAULT_START_SEASON)
+    parser.add_argument("--regression-start-season", type=int, default=DEFAULT_REGRESSION_START_SEASON)
     parser.add_argument("--n-sims", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=None)
     return parser.parse_args()
@@ -40,7 +41,7 @@ def main() -> None:
     args = parse_args()
 
     print("Fitting Elo (Stage 1) + offseason adjustment (Stage 1b)...")
-    pipeline = fit_adjusted_elo_pipeline(args.start_season)
+    pipeline = fit_adjusted_elo_pipeline(args.start_season, regression_start_season=args.regression_start_season)
     upcoming_season = pipeline.max_season + 1
 
     projected_adjustments = project_upcoming_season(pipeline.features, pipeline.full_model, upcoming_season)

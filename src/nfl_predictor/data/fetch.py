@@ -32,7 +32,14 @@ def fetch_weekly_data(years: list[int]) -> pd.DataFrame:
 
 
 def fetch_rosters(years: list[int]) -> pd.DataFrame:
-    return nfl.import_seasonal_rosters(years)
+    df = nfl.import_seasonal_rosters(years)
+    # jersey_number/draft_number come back as str for some historical seasons
+    # and float for others (confirmed: 2007/2015 str, 2020/2025 float) --
+    # pyarrow can't write a column that's genuinely mixed-type across rows,
+    # so coerce to a single numeric dtype before it ever reaches Parquet.
+    for col in ("jersey_number", "draft_number"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
 
 
 def fetch_injuries(years: list[int]) -> pd.DataFrame:

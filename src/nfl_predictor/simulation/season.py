@@ -15,6 +15,7 @@ import pandas as pd
 from nfl_predictor.config import DATA_DIR
 from nfl_predictor.ratings.elo import regress_to_mean, update_ratings
 from nfl_predictor.simulation.standings import new_standings, record_game, seed_conference
+from nfl_predictor.team_codes import canonicalize_teams
 
 
 def fit_margin_model(elo_game_log: pd.DataFrame) -> tuple[float, float, float]:
@@ -43,10 +44,12 @@ def project_starting_ratings(
 
 
 def load_team_division_conference() -> tuple[dict[str, str], dict[str, str]]:
-    """team -> division, team -> conference, restricted to the 32 team codes
-    actually used in schedules.parquet (team_desc.parquet also carries old
-    codes for relocated franchises, e.g. OAK/SD/STL)."""
+    """team -> division, team -> conference, restricted to the 32 current
+    team codes (schedules.parquet spans back to 2007 and, before
+    canonicalizing, carries old codes for relocated franchises, e.g.
+    OAK/SD/STL; team_desc.parquet carries those same old codes too)."""
     schedules = pd.read_parquet(DATA_DIR / "schedules.parquet")
+    schedules = canonicalize_teams(schedules, ["home_team", "away_team"])
     current_teams = set(schedules["home_team"].unique()) | set(schedules["away_team"].unique())
     team_desc = pd.read_parquet(DATA_DIR / "team_desc.parquet")
     team_desc = team_desc[team_desc["team_abbr"].isin(current_teams)].drop_duplicates("team_abbr")

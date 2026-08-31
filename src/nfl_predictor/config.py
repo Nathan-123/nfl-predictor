@@ -21,14 +21,33 @@ MIN_SEASON = {
     "injuries": 2009,
 }
 
-# Datasets that should always be fetched further back than a run's requested
-# start season, even the DEFAULT_START_SEASON default. draft_picks needs
-# mature (4+ year old) classes to fit an expected-value-by-draft-slot curve
-# (ratings/offseason_features.py) -- the 17-game-era 2021+ default alone
-# doesn't leave any classes old enough for that.
+# Datasets that should ALWAYS be fetched further back than a run's requested
+# start season, on every call, regardless of caller intent -- reserved for
+# cases where that's intrinsically required, not just "wider is nicer".
+# draft_picks needs mature (4+ year old) classes to fit an expected-value-
+# by-draft-slot curve (ratings/offseason_features.py); the 17-game-era 2021+
+# default alone doesn't leave any classes old enough for that.
+#
+# schedules/pbp/rosters are NOT here on purpose, even though the offseason-
+# adjustment regression wants them widened back to 2007 -- unlike
+# draft_picks, that's a need specific to one caller
+# (ratings.adjustment.fit_adjusted_elo_pipeline's regression_start_season),
+# not every pipeline run. Putting them here previously made an unrelated
+# small-range smoke test silently balloon into a multi-minute full historical
+# pbp refetch. The one-off backfill (`run_pipeline.py --datasets
+# schedules,rosters,pbp --start-season 2007`) already widened the on-disk
+# cache; that's sufficient without a standing floor.
 EXTENDED_START_SEASON = {
     "draft_picks": 2005,
 }
+
+# Default start season for the offseason-adjustment regression's *training*
+# data (season-transitions used to fit the model), kept separate from
+# DEFAULT_START_SEASON which still governs the production Elo engine/current
+# ratings/backtest window. A few seasons of Elo warm-up are discarded before
+# the first trusted transition -- see fit_adjusted_elo_pipeline. Requires the
+# one-off backfill above to have been run at least once.
+DEFAULT_REGRESSION_START_SEASON = 2007
 
 # Datasets written as data/raw/<name>/<season>.parquet (one file per season)
 # instead of a single data/raw/<name>.parquet. Use for datasets large enough

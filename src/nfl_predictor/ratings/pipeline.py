@@ -14,6 +14,7 @@ import pandas as pd
 
 from nfl_predictor.config import DATA_DIR, PROCESSED_DIR
 from nfl_predictor.metrics import brier_score, log_loss
+from nfl_predictor.team_codes import canonicalize_teams
 from nfl_predictor.ratings.elo import (
     DEFAULT_K,
     DEFAULT_MEAN,
@@ -46,6 +47,10 @@ def _load_played_games(start_season: int, end_season: int | None) -> pd.DataFram
     df = df[df["season"] >= start_season]
     if end_season is not None:
         df = df[df["season"] <= end_season]
+    # No-op for 2021+ (already standard codes); gives relocated franchises
+    # (Rams/Chargers/Raiders) continuous identity across their old/new codes
+    # when this is run further back in history.
+    df = canonicalize_teams(df, ["home_team", "away_team"])
     return df.sort_values(["season", "week", "gameday"]).reset_index(drop=True)
 
 
