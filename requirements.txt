@@ -4,3 +4,5 @@ numpy
 pyarrow
 tqdm
 pytest
+xgboost
+scikit-learn

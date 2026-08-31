@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from nfl_predictor.config import DATA_DIR, PROCESSED_DIR
+from nfl_predictor.metrics import brier_score, log_loss
 from nfl_predictor.ratings.elo import (
     DEFAULT_K,
     DEFAULT_MEAN,
@@ -62,15 +63,6 @@ def _market_home_win_prob(row: dict) -> float | None:
     p_away_raw = _moneyline_to_implied_prob(away_ml)
     # Remove the sportsbook's vig by normalizing the pair to sum to 1.
     return p_home_raw / (p_home_raw + p_away_raw)
-
-
-def _brier_score(preds: np.ndarray, actuals: np.ndarray) -> float:
-    return float(np.mean((preds - actuals) ** 2))
-
-
-def _log_loss(preds: np.ndarray, actuals: np.ndarray, eps: float = 1e-12) -> float:
-    p = np.clip(preds, eps, 1 - eps)
-    return float(-np.mean(actuals * np.log(p) + (1 - actuals) * np.log(1 - p)))
 
 
 def run(
@@ -173,12 +165,12 @@ def run(
     summary = BacktestSummary(
         n_games=len(game_log),
         hfa_used=hfa,
-        elo_brier=_brier_score(preds, actuals),
-        elo_log_loss=_log_loss(preds, actuals),
-        baseline_brier=_brier_score(baseline, actuals),
-        baseline_log_loss=_log_loss(baseline, actuals),
-        market_brier=_brier_score(market_preds, market_actuals) if market_mask.any() else None,
-        market_log_loss=_log_loss(market_preds, market_actuals) if market_mask.any() else None,
+        elo_brier=brier_score(preds, actuals),
+        elo_log_loss=log_loss(preds, actuals),
+        baseline_brier=brier_score(baseline, actuals),
+        baseline_log_loss=log_loss(baseline, actuals),
+        market_brier=brier_score(market_preds, market_actuals) if market_mask.any() else None,
+        market_log_loss=log_loss(market_preds, market_actuals) if market_mask.any() else None,
         market_coverage=int(market_mask.sum()),
     )
 
