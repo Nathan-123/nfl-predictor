@@ -17,6 +17,9 @@ from nfl_predictor.ratings.elo import regress_to_mean, update_ratings
 from nfl_predictor.simulation.standings import new_standings, record_game, seed_conference
 from nfl_predictor.team_codes import canonicalize_teams
 
+# Imported lazily inside run_simulations to avoid a circular import
+# (playoffs.py imports margin_to_scores from this module).
+
 
 def fit_margin_model(elo_game_log: pd.DataFrame) -> tuple[float, float, float]:
     """OLS home_margin ~ intercept + slope * elo_diff on real history, plus
@@ -96,7 +99,7 @@ def simulate_one_season(
         record_game(standings, home, away, home_score, away_score, divisions, conferences)
         ratings[home], ratings[away] = update_ratings(ratings[home], ratings[away], home_score, away_score, hfa, k)
 
-    return standings
+    return standings, ratings
 
 
 @dataclass
@@ -118,6 +121,8 @@ def run_simulations(
     conferences: dict[str, str],
     seed: int | None = None,
 ) -> SimulationResults:
+    from nfl_predictor.simulation.playoffs import simulate_playoffs
+
     rng = np.random.default_rng(seed)
     teams = list(starting_ratings.keys())
     conference_names = sorted(set(conferences.values()))
@@ -126,23 +131,40 @@ def run_simulations(
     playoff_counts = {t: 0 for t in teams}
     division_counts = {t: 0 for t in teams}
     one_seed_counts = {t: 0 for t in teams}
+    won_wildcard_counts = {t: 0 for t in teams}
+    conf_championship_counts = {t: 0 for t in teams}
+    super_bowl_counts = {t: 0 for t in teams}
+    champion_counts = {t: 0 for t in teams}
 
     for sim in range(n_sims):
-        standings = simulate_one_season(
+        standings, final_ratings = simulate_one_season(
             schedule, starting_ratings, hfa, k, margin_intercept, margin_slope, margin_std, divisions, conferences, rng
         )
         for t in teams:
             rec = standings[t]
             win_rows.append({"sim": sim, "team": t, "wins": rec.wins + 0.5 * rec.ties})
 
+        seeds_by_conference = {}
         for conf in conference_names:
             conf_teams = [t for t in teams if conferences[t] == conf]
             seeds = seed_conference(conf_teams, divisions, standings)
+            seeds_by_conference[conf] = seeds
             for t in seeds:
                 playoff_counts[t] += 1
             for t in seeds[:4]:
                 division_counts[t] += 1
             one_seed_counts[seeds[0]] += 1
+
+        playoff_result = simulate_playoffs(
+            seeds_by_conference, final_ratings, hfa, k, margin_intercept, margin_slope, margin_std, rng
+        )
+        for t in playoff_result.divisional_teams:
+            won_wildcard_counts[t] += 1
+        for t in playoff_result.conference_championship_teams:
+            conf_championship_counts[t] += 1
+        for t in playoff_result.super_bowl_teams:
+            super_bowl_counts[t] += 1
+        champion_counts[playoff_result.champion] += 1
 
     win_totals = pd.DataFrame(win_rows)
     grouped = win_totals.groupby("team")["wins"]
@@ -156,6 +178,10 @@ def run_simulations(
             "playoff_prob": [playoff_counts[t] / n_sims for t in grouped.mean().index],
             "division_prob": [division_counts[t] / n_sims for t in grouped.mean().index],
             "one_seed_prob": [one_seed_counts[t] / n_sims for t in grouped.mean().index],
+            "won_wildcard_prob": [won_wildcard_counts[t] / n_sims for t in grouped.mean().index],
+            "conf_championship_prob": [conf_championship_counts[t] / n_sims for t in grouped.mean().index],
+            "super_bowl_prob": [super_bowl_counts[t] / n_sims for t in grouped.mean().index],
+            "champion_prob": [champion_counts[t] / n_sims for t in grouped.mean().index],
         }
     ).sort_values("mean_wins", ascending=False).reset_index(drop=True)
 

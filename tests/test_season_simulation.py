@@ -107,3 +107,11 @@ def test_full_simulation_pipeline_is_internally_consistent():
     assert summary["one_seed_prob"].sum() == pytest.approx(2.0)  # 1 per conference
     assert (summary["division_prob"] <= summary["playoff_prob"] + 1e-9).all()
     assert (summary["mean_wins"] >= 0).all() and (summary["mean_wins"] <= 17).all()
+
+    # Stage 4 playoff rounds: mass at each round matches that round's bracket size.
+    assert summary["won_wildcard_prob"].sum() == pytest.approx(8.0)  # 4 survivors x 2 conferences
+    assert summary["conf_championship_prob"].sum() == pytest.approx(4.0)  # 2 finalists x 2 conferences
+    assert summary["super_bowl_prob"].sum() == pytest.approx(2.0)  # 1 champion x 2 conferences
+    assert summary["champion_prob"].sum() == pytest.approx(1.0)  # exactly 1 Super Bowl winner, every sim
+    assert (summary["won_wildcard_prob"] <= summary["playoff_prob"] + 1e-9).all()
+    assert (summary["champion_prob"] <= summary["super_bowl_prob"] + 1e-9).all()

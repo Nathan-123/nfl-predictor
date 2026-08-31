@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""CLI entrypoint for Stage 3: Monte Carlo full-season simulation.
+"""CLI entrypoint for Stage 3 (regular season) + Stage 4 (playoffs): Monte
+Carlo simulation of the upcoming NFL season through to a Super Bowl champion.
 
 Example:
     python scripts/run_season_simulation.py --n-sims 10000
@@ -81,7 +82,16 @@ def main() -> None:
     display = results.summary.copy()
     for col in ["mean_wins", "median_wins", "wins_p10", "wins_p90"]:
         display[col] = display[col].round(1)
-    for col in ["playoff_prob", "division_prob", "one_seed_prob"]:
+    pct_cols = [
+        "playoff_prob",
+        "division_prob",
+        "one_seed_prob",
+        "won_wildcard_prob",
+        "conf_championship_prob",
+        "super_bowl_prob",
+        "champion_prob",
+    ]
+    for col in pct_cols:
         display[col] = (display[col] * 100).round(1)
     print(display.to_string(index=False))
 
