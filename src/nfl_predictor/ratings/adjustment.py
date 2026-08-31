@@ -94,3 +94,63 @@ def season_adjustments_from_loso(df: pd.DataFrame) -> dict[tuple[int, str], floa
     """(season, team) -> LOSO-predicted adjustment, ready to feed into
     ratings.pipeline.run(season_adjustments=...)."""
     return {(row.season, row.team): row.loso_predicted_adjustment for row in df.itertuples(index=False)}
+
+
+def project_upcoming_season(
+    features: pd.DataFrame, full_model: FittedModel, upcoming_season: int
+) -> dict[str, float]:
+    """team -> projected adjustment for a season with no known outcome yet
+    (e.g. next season), using the model fit on all available history --
+    there's nothing to leave out for a season that hasn't happened. Missing
+    features (e.g. QB continuity before Week 1 starters are known) fall back
+    to a neutral 0."""
+    upcoming = features[features["season"] == upcoming_season].copy()
+    upcoming[FEATURE_COLS] = upcoming[FEATURE_COLS].fillna(0.0)
+    upcoming["projected_adjustment"] = predict(full_model, upcoming)
+    return dict(zip(upcoming["team"], upcoming["projected_adjustment"]))
+
+
+@dataclass
+class AdjustedEloPipeline:
+    baseline_log: pd.DataFrame
+    baseline_summary: object  # ratings.pipeline.BacktestSummary, pre-adjustment
+    adjusted_log: pd.DataFrame
+    adjusted_ratings: pd.DataFrame
+    adjusted_summary: object  # ratings.pipeline.BacktestSummary
+    features: pd.DataFrame
+    full_model: FittedModel
+    loso_df: pd.DataFrame
+    max_season: int
+
+
+def fit_adjusted_elo_pipeline(start_season: int) -> AdjustedEloPipeline:
+    """The complete Stage 1 -> Stage 1b pipeline in one call: baseline Elo,
+    offseason features, LOSO-fit adjustment model, and Elo re-run with those
+    adjustments applied. Shared by every script that needs "the current
+    adjusted ratings" (run_offseason_adjustment.py, the season simulator)
+    so they can't silently drift from each other."""
+    from nfl_predictor.ratings.offseason_features import build_offseason_features
+    from nfl_predictor.ratings.pipeline import run as run_elo
+
+    baseline_log, _, baseline_summary = run_elo(start_season=start_season)
+    max_season = int(baseline_log["season"].max())
+    features = build_offseason_features(start_season, max_season + 1)
+
+    full_model, loso_df = fit_with_loso_cv(features, baseline_log)
+    season_adjustments = season_adjustments_from_loso(loso_df)
+
+    adjusted_log, adjusted_ratings, adjusted_summary = run_elo(
+        start_season=start_season, season_adjustments=season_adjustments
+    )
+
+    return AdjustedEloPipeline(
+        baseline_log=baseline_log,
+        baseline_summary=baseline_summary,
+        adjusted_log=adjusted_log,
+        adjusted_ratings=adjusted_ratings,
+        adjusted_summary=adjusted_summary,
+        features=features,
+        full_model=full_model,
+        loso_df=loso_df,
+        max_season=max_season,
+    )
