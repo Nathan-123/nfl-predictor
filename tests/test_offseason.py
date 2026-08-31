@@ -240,6 +240,61 @@ def test_skill_value_delta_negative_when_team_loses_a_productive_player(tmp_path
     assert delta < 0  # lost a well-above-average player, incoming replacement has no track record
 
 
+# ---- special teams value delta (synthetic pbp + rosters) --------------------
+
+
+def test_special_teams_value_combines_kicking_and_punting(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "PBP_DIR", tmp_path)
+    defaults = {
+        "kicker_player_id": None,
+        "punter_player_id": None,
+        "field_goal_attempt": 0,
+        "extra_point_attempt": 0,
+        "punt_attempt": 0,
+    }
+    pd.DataFrame(
+        [{**defaults, **r} for r in
+         [{"kicker_player_id": "kicker", "field_goal_attempt": 1, "epa": 1.0}] * 10
+         + [{"punter_player_id": "punter", "punt_attempt": 1, "epa": 0.2}] * 10]
+    ).to_parquet(tmp_path / "2021.parquet", index=False)
+
+    values = offseason_features.compute_special_teams_value_by_season([2021]).set_index("player_id")[
+        "special_teams_value"
+    ]
+    assert values.loc["kicker"] == pytest.approx(10.0)
+    assert values.loc["punter"] == pytest.approx(2.0)
+
+
+def test_special_teams_value_delta_positive_when_team_gains_a_productive_kicker(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "PBP_DIR", tmp_path)
+    defaults = {
+        "kicker_player_id": None,
+        "punter_player_id": None,
+        "field_goal_attempt": 0,
+        "extra_point_attempt": 0,
+        "punt_attempt": 0,
+    }
+    rows = [{"kicker_player_id": f"avg{i}", "field_goal_attempt": 1, "epa": 0.1} for i in range(1, 5)] + [
+        {"kicker_player_id": "star", "field_goal_attempt": 1, "epa": 2.0}
+    ] * 10
+    pd.DataFrame([{**defaults, **r} for r in rows]).to_parquet(tmp_path / "2021.parquet", index=False)
+    pd.DataFrame([{**defaults, "epa": 0.0}]).to_parquet(tmp_path / "2022.parquet", index=False)
+
+    rosters = _fake_rosters(
+        [
+            {"season": 2021, "team": "OTHER1", "player_id": "avg1", "position": "K"},
+            {"season": 2021, "team": "OTHER2", "player_id": "avg2", "position": "K"},
+            {"season": 2021, "team": "OTHER3", "player_id": "avg3", "position": "K"},
+            {"season": 2021, "team": "OTHER4", "player_id": "avg4", "position": "K"},
+            {"season": 2021, "team": "RIVAL", "player_id": "star", "position": "K"},
+            # TEAM's 2021 room was empty; TEAM signs "star" ahead of 2022.
+            {"season": 2022, "team": "TEAM", "player_id": "star", "position": "K"},
+        ]
+    )
+    deltas = offseason_features.build_special_teams_value_deltas(rosters).set_index(["season", "team"])
+    assert deltas.loc[(2022, "TEAM"), "special_teams_value_delta"] > 0
+
+
 # ---- defensive value delta (synthetic PFR def stats + rosters) --------------
 
 

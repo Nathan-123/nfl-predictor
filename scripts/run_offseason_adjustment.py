@@ -44,7 +44,7 @@ def main() -> None:
 
     print(f"\nFitted on {pipeline.full_model.n_rows} team-season transitions ({sorted(pipeline.loso_df['season'].unique())}):")
     for name, coef in pipeline.full_model.coefficients.items():
-        print(f"  {name:<22}{coef:+.3f}")
+        print(f"  {name:<28}{coef:+.3f}")
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     pipeline.adjusted_log.to_parquet(ADJUSTED_GAME_LOG_PATH, index=False)

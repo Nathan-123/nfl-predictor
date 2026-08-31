@@ -19,6 +19,7 @@ DRAFT_CURVE_MATURITY_YEARS = 4  # only fit the pick-value curve on classes at le
 SKILL_POSITIONS = {"RB", "WR", "TE"}
 DEFENSE_POSITIONS = {"DB", "DL", "LB", "CB", "DE", "OLB", "DT", "ILB", "MLB", "NT", "SS", "FS", "S"}
 MIN_COVERAGE_TARGETS = 10  # below this, a defender's opponent-passer-rating-allowed is too noisy to trust
+SPECIAL_TEAMS_POSITIONS = {"K", "P"}  # returners aren't a roster position (see offseason_features docs)
 
 
 def _week1_rows(schedules: pd.DataFrame) -> pd.DataFrame:
@@ -268,6 +269,96 @@ def build_skill_value_deltas(rosters: pd.DataFrame) -> pd.DataFrame:
     return merged[["season", "team", "skill_value_delta"]]
 
 
+def compute_special_teams_value_by_season(seasons: list[int]) -> pd.DataFrame:
+    """season, player_id, special_teams_value -- a SUM of EPA on plays where
+    the player was the kicker (field goal or extra point attempt) plus EPA
+    on plays where they were the punter. A player is essentially always one
+    or the other, so this just picks up whichever applies -- same shape as
+    compute_skill_value_by_season combining rushing+receiving EPA."""
+    frames = []
+    for season in seasons:
+        path = PBP_DIR / f"{season}.parquet"
+        if not path.exists():
+            continue
+        pbp = pd.read_parquet(
+            path,
+            columns=[
+                "kicker_player_id",
+                "punter_player_id",
+                "epa",
+                "field_goal_attempt",
+                "extra_point_attempt",
+                "punt_attempt",
+            ],
+        )
+        kicking_mask = (pbp["field_goal_attempt"] == 1) | (pbp["extra_point_attempt"] == 1)
+        kicking_value = (
+            pbp[kicking_mask & pbp["kicker_player_id"].notna() & pbp["epa"].notna()]
+            .groupby("kicker_player_id")["epa"]
+            .sum()
+            .rename_axis("player_id")
+        )
+        punting_value = (
+            pbp[(pbp["punt_attempt"] == 1) & pbp["punter_player_id"].notna() & pbp["epa"].notna()]
+            .groupby("punter_player_id")["epa"]
+            .sum()
+            .rename_axis("player_id")
+        )
+        combined = kicking_value.add(punting_value, fill_value=0.0).rename("special_teams_value").reset_index()
+        combined["season"] = season
+        frames.append(combined)
+    if not frames:
+        return pd.DataFrame(columns=["season", "player_id", "special_teams_value"])
+    return pd.concat(frames, ignore_index=True)
+
+
+def build_special_teams_value_deltas(rosters: pd.DataFrame) -> pd.DataFrame:
+    """season, team, special_teams_value_delta: same incoming-vs-prior-team-
+    value structure as build_skill_value_deltas, for the K/P positions.
+    Uses rosters' own player_id directly (kicker_player_id/punter_player_id
+    in pbp already use the same gsis format -- no crosswalk needed, unlike
+    the defensive value delta's pfr_id situation)."""
+    st_rosters = rosters[rosters["position"].isin(SPECIAL_TEAMS_POSITIONS)][["season", "team", "player_id", "week"]]
+    st_rosters = st_rosters.sort_values("week", na_position="first").drop_duplicates(
+        subset=["season", "player_id"], keep="last"
+    )[["season", "team", "player_id"]]
+    seasons = sorted(rosters["season"].unique())
+    player_values = compute_special_teams_value_by_season(seasons)
+
+    roster_values = st_rosters.merge(player_values, on=["season", "player_id"], how="left")
+    roster_values["special_teams_value"] = roster_values["special_teams_value"].fillna(0.0)
+    season_stats = roster_values.groupby("season")["special_teams_value"].agg(["mean", "std"])
+    roster_values = roster_values.merge(season_stats, on="season", how="left")
+    roster_values["special_teams_value_z"] = (
+        (roster_values["special_teams_value"] - roster_values["mean"]) / roster_values["std"].replace(0, np.nan)
+    ).fillna(0.0)
+
+    replacement_by_season = roster_values.groupby("season")["special_teams_value_z"].quantile(0.25).to_dict()
+    fallback_level = roster_values["special_teams_value_z"].quantile(0.25) if not roster_values.empty else 0.0
+    value_lookup = roster_values.set_index(["season", "player_id"])["special_teams_value_z"].sort_index()
+
+    def value_of(player_id: str, as_of_season: int) -> float:
+        if (as_of_season, player_id) in value_lookup.index:
+            return value_lookup.loc[(as_of_season, player_id)]
+        return replacement_by_season.get(as_of_season, fallback_level)
+
+    team_season_value = roster_values.groupby(["season", "team"])["special_teams_value_z"].sum().reset_index()
+    prior_team_value = team_season_value.copy()
+    prior_team_value["season"] = prior_team_value["season"] + 1
+    prior_team_value = prior_team_value.rename(columns={"special_teams_value_z": "prior_team_st_value"})
+
+    incoming = st_rosters.copy()
+    incoming["value_season"] = incoming["season"] - 1
+    incoming["special_teams_value_z"] = incoming.apply(lambda r: value_of(r["player_id"], r["value_season"]), axis=1)
+    incoming_value = incoming.groupby(["season", "team"])["special_teams_value_z"].sum().reset_index()
+    incoming_value = incoming_value.rename(columns={"special_teams_value_z": "incoming_st_value"})
+
+    merged = incoming_value.merge(prior_team_value, on=["season", "team"], how="left")
+    merged["prior_team_st_value"] = merged["prior_team_st_value"].fillna(0.0)
+    merged["special_teams_value_delta"] = merged["incoming_st_value"] - merged["prior_team_st_value"]
+    return merged[["season", "team", "special_teams_value_delta"]]
+
+
 def compute_defensive_value_by_season(seasons: list[int]) -> pd.DataFrame:
     """season, pfr_id, defensive_value -- a composite of era-normalized
     (same-season z-scored) pass-rush production (prss, "pressures") and
@@ -390,6 +481,7 @@ def build_offseason_features(start_season: int, end_season: int) -> pd.DataFrame
     features = features.merge(build_draft_capital_added(draft_picks), on=["season", "team"], how="left")
     features["draft_capital_added"] = features["draft_capital_added"].fillna(0.0)  # no picks that year = 0 added
     features = features.merge(build_skill_value_deltas(rosters), on=["season", "team"], how="left")
+    features = features.merge(build_special_teams_value_deltas(rosters), on=["season", "team"], how="left")
     features = features.merge(build_defense_value_deltas(rosters), on=["season", "team"], how="left")
     features["defense_value_delta"] = features["defense_value_delta"].fillna(0.0)  # no PFR def data before 2018
     features = features.merge(load_preseason_win_totals(), on=["season", "team"], how="left")

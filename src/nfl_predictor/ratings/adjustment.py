@@ -20,6 +20,7 @@ FEATURE_COLS = [
     "qb_value_delta",
     "draft_capital_added",
     "skill_value_delta",
+    "special_teams_value_delta",
     "defense_value_delta",
 ]
 
