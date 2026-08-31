@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-FEATURE_COLS = ["coaching_change", "qb_value_delta", "draft_capital_added"]
+FEATURE_COLS = ["coaching_change", "qb_value_delta", "draft_capital_added", "skill_value_delta"]
 
 
 @dataclass

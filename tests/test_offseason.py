@@ -90,6 +90,59 @@ def test_qb_value_delta_reflects_prior_season_performance(tmp_path, monkeypatch)
     assert deltas.loc[(2022, "TEAM"), "qb_value_delta"] == pytest.approx(0.3 - (-0.1))
 
 
+# ---- skill-position value delta (synthetic pbp + rosters) -------------------
+
+
+def test_skill_value_delta_positive_when_team_gains_a_productive_player(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "PBP_DIR", tmp_path)
+
+    def make_pbp(season: int, rows: list[dict]) -> None:
+        defaults = {"rush": 0, "pass": 0, "rusher_id": None, "receiver_id": None}
+        pd.DataFrame(
+            [{**defaults, **r} for r in rows], columns=["rusher_id", "receiver_id", "epa", "rush", "pass"]
+        ).to_parquet(tmp_path / f"{season}.parquet", index=False)
+
+    # 2021: "star" WR racks up a lot of receiving value while on RIVAL, not TEAM.
+    make_pbp(2021, [{"receiver_id": "star", "epa": 2.0, "pass": 1}] * 20)
+    # 2022: no plays needed (skill_value_delta only looks at *prior*-season production).
+    make_pbp(2022, [])
+
+    rosters = pd.DataFrame(
+        [
+            {"season": 2021, "team": "RIVAL", "player_id": "star", "position": "WR"},
+            # TEAM's 2021 room was empty/unproductive -- nobody else to speak of.
+            {"season": 2022, "team": "TEAM", "player_id": "star", "position": "WR"},  # traded in for 2022
+        ]
+    )
+    deltas = offseason_features.build_skill_value_deltas(rosters).set_index(["season", "team"])
+    assert deltas.loc[(2022, "TEAM"), "skill_value_delta"] == pytest.approx(40.0)  # 20 plays x 2.0 epa
+
+
+def test_skill_value_delta_negative_when_team_loses_a_productive_player(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "PBP_DIR", tmp_path)
+
+    def make_pbp(season: int, rows: list[dict]) -> None:
+        defaults = {"rush": 0, "pass": 0, "rusher_id": None, "receiver_id": None}
+        pd.DataFrame(
+            [{**defaults, **r} for r in rows], columns=["rusher_id", "receiver_id", "epa", "rush", "pass"]
+        ).to_parquet(tmp_path / f"{season}.parquet", index=False)
+
+    # 2021: "star" RB produces a lot of rushing value while on TEAM.
+    make_pbp(2021, [{"rusher_id": "star", "epa": 1.5, "rush": 1}] * 20)
+    make_pbp(2022, [])
+
+    rosters = pd.DataFrame(
+        [
+            {"season": 2021, "team": "TEAM", "player_id": "star", "position": "RB"},
+            # 2022: TEAM's room is empty (star left for free agency/trade elsewhere, not modeled here).
+            {"season": 2022, "team": "TEAM", "player_id": "replacement", "position": "RB"},
+        ]
+    )
+    deltas = offseason_features.build_skill_value_deltas(rosters).set_index(["season", "team"])
+    # 0 incoming (replacement has no prior-season production) - 30 prior (20 x 1.5) = -30.
+    assert deltas.loc[(2022, "TEAM"), "skill_value_delta"] == pytest.approx(-30.0)
+
+
 # ---- integration: real cached history ---------------------------------------
 
 

@@ -1,8 +1,9 @@
 """Preseason signals for each (season, team): did the head coach change,
 how does the incoming starting QB compare to who actually played last year,
-how much draft capital was added, and (2026 only so far) the market's
-preseason win total. See ratings/adjustment.py for how these get combined
-into an Elo starting-rating adjustment.
+how much draft capital was added, how does the incoming RB/WR/TE room's
+prior production compare to what the team actually had last year, and
+(2026 only so far) the market's preseason win total. See ratings/adjustment.py
+for how these get combined into an Elo starting-rating adjustment.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from nfl_predictor.config import DATA_DIR, MANUAL_DIR, PBP_DIR
 
 MIN_DROPBACKS = 100  # below this, a QB-season's EPA/dropback is too noisy to trust
 DRAFT_CURVE_MATURITY_YEARS = 4  # only fit the pick-value curve on classes at least this old
+SKILL_POSITIONS = {"RB", "WR", "TE"}
 
 # draft_picks.team comes from PFR and uses different abbreviations than every
 # other dataset (schedules, rosters, ...), which follow nflverse's style --
@@ -160,6 +162,78 @@ def build_draft_capital_added(draft_picks: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def compute_skill_value_by_season(seasons: list[int]) -> pd.DataFrame:
+    """season, player_id, skill_value -- a SUM (not rate) of EPA on plays
+    where the player was the rusher, plus EPA on plays where they were the
+    targeted receiver (completions and incompletions both, the standard
+    targeted-EPA convention). Summing rather than averaging means a player's
+    value naturally scales with their usage/opportunity, not just
+    efficiency, and a barely-used camp body ends up near zero without
+    needing to be filtered out separately."""
+    frames = []
+    for season in seasons:
+        path = PBP_DIR / f"{season}.parquet"
+        if not path.exists():
+            continue
+        pbp = pd.read_parquet(path, columns=["rusher_id", "receiver_id", "epa", "rush", "pass"])
+        rush_value = (
+            pbp[(pbp["rush"] == 1) & pbp["rusher_id"].notna() & pbp["epa"].notna()]
+            .groupby("rusher_id")["epa"]
+            .sum()
+            .rename_axis("player_id")
+        )
+        rec_value = (
+            pbp[(pbp["pass"] == 1) & pbp["receiver_id"].notna() & pbp["epa"].notna()]
+            .groupby("receiver_id")["epa"]
+            .sum()
+            .rename_axis("player_id")
+        )
+        combined = rush_value.add(rec_value, fill_value=0.0).rename("skill_value").reset_index()
+        combined["season"] = season
+        frames.append(combined)
+    if not frames:
+        return pd.DataFrame(columns=["season", "player_id", "skill_value"])
+    return pd.concat(frames, ignore_index=True)
+
+
+def build_skill_value_deltas(rosters: pd.DataFrame) -> pd.DataFrame:
+    """season, team, skill_value_delta: the RB/WR/TE room's incoming value
+    (each player on this season's roster, valued by their OWN prior-season
+    production wherever they played -- this is what picks up a trade) minus
+    the team's own actual prior-season RB/WR/TE production. Generalizes
+    qb_value_delta from one starter to a whole position group; zero net
+    turnover (same players, same production) nets to ~0."""
+    skill_rosters = rosters[rosters["position"].isin(SKILL_POSITIONS)][["season", "team", "player_id"]]
+    seasons = sorted(rosters["season"].unique())
+    player_values = compute_skill_value_by_season(seasons)
+
+    # What each team actually got from its own RB/WR/TE room, per season --
+    # doubles as both "the comparison baseline for the following season" and
+    # an intermediate needed to build that baseline.
+    own_value = skill_rosters.merge(player_values, on=["season", "player_id"], how="left")
+    own_value["skill_value"] = own_value["skill_value"].fillna(0.0)
+    team_season_value = own_value.groupby(["season", "team"])["skill_value"].sum().reset_index()
+
+    prior_team_value = team_season_value.copy()
+    prior_team_value["season"] = prior_team_value["season"] + 1
+    prior_team_value = prior_team_value.rename(columns={"skill_value": "prior_team_skill_value"})
+
+    # This season's roster, valued by each player's prior-season production.
+    incoming = skill_rosters.copy()
+    incoming["value_season"] = incoming["season"] - 1
+    incoming = incoming.merge(
+        player_values.rename(columns={"season": "value_season"}), on=["value_season", "player_id"], how="left"
+    )
+    incoming["skill_value"] = incoming["skill_value"].fillna(0.0)
+    incoming_value = incoming.groupby(["season", "team"])["skill_value"].sum().reset_index()
+    incoming_value = incoming_value.rename(columns={"skill_value": "incoming_skill_value"})
+
+    merged = incoming_value.merge(prior_team_value, on=["season", "team"], how="left")
+    merged["prior_team_skill_value"] = merged["prior_team_skill_value"].fillna(0.0)
+    merged["skill_value_delta"] = merged["incoming_skill_value"] - merged["prior_team_skill_value"]
+    return merged[["season", "team", "skill_value_delta"]]
+
+
 def load_preseason_win_totals() -> pd.DataFrame:
     """season, team, preseason_win_total -- from the manually-curated CSV.
     Sparse (only seasons we've sourced so far); see data/manual/README-ish
@@ -181,10 +255,13 @@ def build_offseason_features(start_season: int, end_season: int) -> pd.DataFrame
     schedules = pd.read_parquet(DATA_DIR / "schedules.parquet")
     schedules = schedules[(schedules["season"] >= start_season) & (schedules["season"] <= end_season)]
     draft_picks = pd.read_parquet(DATA_DIR / "draft_picks.parquet")
+    rosters = pd.read_parquet(DATA_DIR / "rosters.parquet")
+    rosters = rosters[(rosters["season"] >= start_season) & (rosters["season"] <= end_season)]
 
     features = build_coaching_changes(schedules)
     features = features.merge(build_qb_value_deltas(schedules), on=["season", "team"], how="left")
     features = features.merge(build_draft_capital_added(draft_picks), on=["season", "team"], how="left")
     features["draft_capital_added"] = features["draft_capital_added"].fillna(0.0)  # no picks that year = 0 added
+    features = features.merge(build_skill_value_deltas(rosters), on=["season", "team"], how="left")
     features = features.merge(load_preseason_win_totals(), on=["season", "team"], how="left")
     return features[features["season"] > start_season].reset_index(drop=True)
