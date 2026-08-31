@@ -15,7 +15,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-FEATURE_COLS = ["coaching_change", "qb_value_delta", "draft_capital_added", "skill_value_delta"]
+FEATURE_COLS = [
+    "coaching_change",
+    "qb_value_delta",
+    "draft_capital_added",
+    "skill_value_delta",
+    "defense_value_delta",
+]
 
 # When fitting on a widened regression window, discard transitions from the
 # first few seasons of that window's Elo run -- ratings need a few seasons

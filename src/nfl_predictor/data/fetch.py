@@ -66,6 +66,10 @@ def fetch_pbp(years: list[int]) -> pd.DataFrame:
     return nfl.import_pbp_data(years, downcast=True)
 
 
+def fetch_pfr_def_stats(years: list[int]) -> pd.DataFrame:
+    return nfl.import_seasonal_pfr("def", years)
+
+
 # Registry consumed by the pipeline orchestrator. Keys double as the
 # --datasets CLI values and the output parquet filenames.
 DATASETS = {
@@ -80,4 +84,5 @@ DATASETS = {
     "combine": fetch_combine_data,
     "win_totals": fetch_win_totals,
     "pbp": fetch_pbp,
+    "pfr_def_stats": fetch_pfr_def_stats,
 }

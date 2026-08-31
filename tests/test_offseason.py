@@ -240,6 +240,93 @@ def test_skill_value_delta_negative_when_team_loses_a_productive_player(tmp_path
     assert delta < 0  # lost a well-above-average player, incoming replacement has no track record
 
 
+# ---- defensive value delta (synthetic PFR def stats + rosters) --------------
+
+
+def _fake_pfr_def_stats(tmp_path, rows: list[dict]) -> None:
+    defaults = {"int": 0.0, "prss": 0.0, "rat": 90.0, "tgt": 0.0, "comb": 0.0}
+    pd.DataFrame([{**defaults, **r} for r in rows]).to_parquet(tmp_path / "pfr_def_stats.parquet", index=False)
+
+
+def test_defensive_value_rewards_pressure_and_penalizes_bad_coverage(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "DATA_DIR", tmp_path)
+    _fake_pfr_def_stats(
+        tmp_path,
+        [
+            {"season": 2021, "pfr_id": "avg1", "prss": 5, "rat": 90.0, "tgt": 20, "comb": 40},
+            {"season": 2021, "pfr_id": "avg2", "prss": 5, "rat": 95.0, "tgt": 20, "comb": 40},
+            {"season": 2021, "pfr_id": "avg3", "prss": 5, "rat": 85.0, "tgt": 20, "comb": 40},
+            {"season": 2021, "pfr_id": "rusher", "prss": 30, "rat": 90.0, "tgt": 20, "comb": 40},
+            {"season": 2021, "pfr_id": "bad_cover", "prss": 5, "rat": 140.0, "tgt": 20, "comb": 40},
+        ],
+    )
+    values = offseason_features.compute_defensive_value_by_season([2021]).set_index("pfr_id")["defensive_value"]
+    assert values.loc["rusher"] > values.loc["avg1"]  # elite pass rush, average coverage
+    assert values.loc["bad_cover"] < values.loc["avg1"]  # average pass rush, bad coverage
+
+
+def test_defensive_value_ignores_rat_below_coverage_qualifier(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "DATA_DIR", tmp_path)
+    _fake_pfr_def_stats(
+        tmp_path,
+        [
+            {"season": 2021, "pfr_id": "avg1", "prss": 5, "rat": 80.0, "tgt": 20, "comb": 40},
+            {"season": 2021, "pfr_id": "avg2", "prss": 5, "rat": 90.0, "tgt": 20, "comb": 40},
+            {"season": 2021, "pfr_id": "avg3", "prss": 5, "rat": 100.0, "tgt": 20, "comb": 40},
+            # Qualified (tgt >= MIN_COVERAGE_TARGETS) with a terrible rat -- should be penalized.
+            {"season": 2021, "pfr_id": "bad_cover_qualified", "prss": 5, "rat": 158.3, "tgt": 20, "comb": 40},
+            # Same terrible rat, but tiny sample -- shouldn't be penalized for it.
+            {"season": 2021, "pfr_id": "bad_cover_small_sample", "prss": 5, "rat": 158.3, "tgt": 1, "comb": 40},
+        ],
+    )
+    values = offseason_features.compute_defensive_value_by_season([2021]).set_index("pfr_id")["defensive_value"]
+    assert values.loc["bad_cover_small_sample"] > values.loc["bad_cover_qualified"]
+
+
+def test_defense_value_delta_positive_when_team_gains_a_productive_defender(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "DATA_DIR", tmp_path)
+    _fake_pfr_def_stats(
+        tmp_path,
+        [{"season": 2021, "pfr_id": f"avg{i}", "prss": 3, "rat": 90.0, "tgt": 20, "comb": 40} for i in range(1, 5)]
+        + [{"season": 2021, "pfr_id": "star", "prss": 25, "int": 2, "rat": 90.0, "tgt": 20, "comb": 40}],
+    )
+    rosters = _fake_rosters(
+        [
+            {"season": 2021, "team": "OTHER1", "player_id": "p_avg1", "pfr_id": "avg1", "position": "CB"},
+            {"season": 2021, "team": "OTHER2", "player_id": "p_avg2", "pfr_id": "avg2", "position": "CB"},
+            {"season": 2021, "team": "OTHER3", "player_id": "p_avg3", "pfr_id": "avg3", "position": "CB"},
+            {"season": 2021, "team": "OTHER4", "player_id": "p_avg4", "pfr_id": "avg4", "position": "CB"},
+            {"season": 2021, "team": "RIVAL", "player_id": "p_star", "pfr_id": "star", "position": "DE"},
+            # TEAM's 2021 room was empty; TEAM trades for "star" ahead of 2022.
+            {"season": 2022, "team": "TEAM", "player_id": "p_star", "pfr_id": "star", "position": "DE"},
+        ]
+    )
+    deltas = offseason_features.build_defense_value_deltas(rosters).set_index(["season", "team"])
+    assert deltas.loc[(2022, "TEAM"), "defense_value_delta"] > 0
+
+
+def test_defense_value_delta_negative_when_team_loses_a_productive_defender(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "DATA_DIR", tmp_path)
+    _fake_pfr_def_stats(
+        tmp_path,
+        [{"season": 2021, "pfr_id": f"avg{i}", "prss": 3, "rat": 90.0, "tgt": 20, "comb": 40} for i in range(1, 5)]
+        + [{"season": 2021, "pfr_id": "star", "prss": 25, "int": 2, "rat": 90.0, "tgt": 20, "comb": 40}],
+    )
+    rosters = _fake_rosters(
+        [
+            {"season": 2021, "team": "OTHER1", "player_id": "p_avg1", "pfr_id": "avg1", "position": "CB"},
+            {"season": 2021, "team": "OTHER2", "player_id": "p_avg2", "pfr_id": "avg2", "position": "CB"},
+            {"season": 2021, "team": "OTHER3", "player_id": "p_avg3", "pfr_id": "avg3", "position": "CB"},
+            {"season": 2021, "team": "OTHER4", "player_id": "p_avg4", "pfr_id": "avg4", "position": "CB"},
+            {"season": 2021, "team": "TEAM", "player_id": "p_star", "pfr_id": "star", "position": "DE"},
+            # 2022: TEAM's room is an unproven replacement (star left in free agency).
+            {"season": 2022, "team": "TEAM", "player_id": "p_replacement", "pfr_id": "replacement", "position": "DE"},
+        ]
+    )
+    deltas = offseason_features.build_defense_value_deltas(rosters).set_index(["season", "team"])
+    assert deltas.loc[(2022, "TEAM"), "defense_value_delta"] < 0
+
+
 # ---- integration: real cached history ---------------------------------------
 
 

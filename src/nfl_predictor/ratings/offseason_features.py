@@ -17,6 +17,8 @@ from nfl_predictor.team_codes import canonicalize_teams
 MIN_DROPBACKS = 100  # below this, a QB-season's EPA/dropback is too noisy to trust
 DRAFT_CURVE_MATURITY_YEARS = 4  # only fit the pick-value curve on classes at least this old
 SKILL_POSITIONS = {"RB", "WR", "TE"}
+DEFENSE_POSITIONS = {"DB", "DL", "LB", "CB", "DE", "OLB", "DT", "ILB", "MLB", "NT", "SS", "FS", "S"}
+MIN_COVERAGE_TARGETS = 10  # below this, a defender's opponent-passer-rating-allowed is too noisy to trust
 
 
 def _week1_rows(schedules: pd.DataFrame) -> pd.DataFrame:
@@ -266,6 +268,97 @@ def build_skill_value_deltas(rosters: pd.DataFrame) -> pd.DataFrame:
     return merged[["season", "team", "skill_value_delta"]]
 
 
+def compute_defensive_value_by_season(seasons: list[int]) -> pd.DataFrame:
+    """season, pfr_id, defensive_value -- a composite of era-normalized
+    (same-season z-scored) pass-rush production (prss, "pressures") and
+    turnovers (interceptions), plus coverage quality (rat, opponent passer
+    rating allowed when targeted -- negated, since lower is better, and
+    only counted for defenders meeting MIN_COVERAGE_TARGETS; a DT/DE
+    targeted once all season would otherwise contribute pure noise).
+    Z-scored against the population of defenders who recorded any stats
+    that season (PFR's own table), not the full bench-inclusive roster --
+    a reasonable, simpler population choice than skill_value's, not
+    identical to it; both are defensible. Deliberately just these 3
+    components rather than a larger hand-weighted composite."""
+    path = DATA_DIR / "pfr_def_stats.parquet"
+    if not path.exists():
+        return pd.DataFrame(columns=["season", "pfr_id", "defensive_value"])
+    df = pd.read_parquet(path, columns=["season", "pfr_id", "int", "prss", "rat", "tgt", "comb"])
+    df = df[df["season"].isin(seasons)].rename(columns={"int": "interceptions"}).copy()
+    # PFR includes an extra row for players who changed teams mid-season (confirmed:
+    # 256 such rows, e.g. a "2TM" row alongside a named-team row for the same
+    # season/pfr_id) -- its exact convention isn't a clean aggregate (the "2TM" row
+    # sometimes has *less* recorded activity than the named-team row, not more), so
+    # rather than guess at PFR's semantics, just keep whichever duplicate has more
+    # recorded tackle activity (comb) as the more complete stat line.
+    df = df.sort_values("comb").drop_duplicates(subset=["season", "pfr_id"], keep="last")
+
+    def zscore(values: pd.Series, qualify: pd.Series | None = None) -> pd.Series:
+        qualify = pd.Series(True, index=values.index) if qualify is None else qualify
+        grouped = values.where(qualify).groupby(df["season"])
+        z = (values - grouped.transform("mean")) / grouped.transform("std").replace(0, np.nan)
+        return z.where(qualify, 0.0).fillna(0.0)
+
+    qualified_coverage = df["tgt"] >= MIN_COVERAGE_TARGETS
+    df["defensive_value"] = (
+        zscore(df["prss"]) + zscore(df["interceptions"]) - zscore(df["rat"], qualify=qualified_coverage)
+    )
+    return df[["season", "pfr_id", "defensive_value"]]
+
+
+def build_defense_value_deltas(rosters: pd.DataFrame) -> pd.DataFrame:
+    """season, team, defense_value_delta: same incoming-vs-prior-team-value
+    structure as build_skill_value_deltas, generalized to the defensive
+    front/coverage positions. Joined via rosters' pfr_id crosswalk (PFR's
+    def-stats table doesn't use the gsis player_id format everything else
+    does) -- confirmed ~65% coverage among 2018+ defensive roster rows,
+    skewed toward players who actually accumulate stats (the missing 35%
+    leans practice-squad/inactive, who wouldn't be in PFR's table anyway).
+    No PFR defensive data before 2018 -- see build_offseason_features,
+    which zero-fills this the same way draft_capital_added already is,
+    rather than NaN-ing out every pre-2018 row."""
+    defense_rosters = rosters[rosters["position"].isin(DEFENSE_POSITIONS) & rosters["pfr_id"].notna()][
+        ["season", "team", "pfr_id", "week"]
+    ]
+    # Same in-season-trade dedup as build_skill_value_deltas: keep the most recent team.
+    defense_rosters = defense_rosters.sort_values("week", na_position="first").drop_duplicates(
+        subset=["season", "pfr_id"], keep="last"
+    )[["season", "team", "pfr_id"]]
+
+    seasons = sorted(rosters["season"].unique())
+    player_values = compute_defensive_value_by_season(seasons)
+    if player_values.empty:
+        return pd.DataFrame(columns=["season", "team", "defense_value_delta"])
+
+    roster_values = defense_rosters.merge(player_values, on=["season", "pfr_id"], how="left")
+    roster_values["defensive_value"] = roster_values["defensive_value"].fillna(0.0)
+
+    replacement_by_season = roster_values.groupby("season")["defensive_value"].quantile(0.25).to_dict()
+    fallback_level = roster_values["defensive_value"].quantile(0.25) if not roster_values.empty else 0.0
+    value_lookup = roster_values.set_index(["season", "pfr_id"])["defensive_value"].sort_index()
+
+    def value_of(pfr_id: str, as_of_season: int) -> float:
+        if (as_of_season, pfr_id) in value_lookup.index:
+            return value_lookup.loc[(as_of_season, pfr_id)]
+        return replacement_by_season.get(as_of_season, fallback_level)
+
+    team_season_value = roster_values.groupby(["season", "team"])["defensive_value"].sum().reset_index()
+    prior_team_value = team_season_value.copy()
+    prior_team_value["season"] = prior_team_value["season"] + 1
+    prior_team_value = prior_team_value.rename(columns={"defensive_value": "prior_team_defensive_value"})
+
+    incoming = defense_rosters.copy()
+    incoming["value_season"] = incoming["season"] - 1
+    incoming["defensive_value"] = incoming.apply(lambda r: value_of(r["pfr_id"], r["value_season"]), axis=1)
+    incoming_value = incoming.groupby(["season", "team"])["defensive_value"].sum().reset_index()
+    incoming_value = incoming_value.rename(columns={"defensive_value": "incoming_defensive_value"})
+
+    merged = incoming_value.merge(prior_team_value, on=["season", "team"], how="left")
+    merged["prior_team_defensive_value"] = merged["prior_team_defensive_value"].fillna(0.0)
+    merged["defense_value_delta"] = merged["incoming_defensive_value"] - merged["prior_team_defensive_value"]
+    return merged[["season", "team", "defense_value_delta"]]
+
+
 def load_preseason_win_totals() -> pd.DataFrame:
     """season, team, preseason_win_total -- from the manually-curated CSV.
     Sparse (only seasons we've sourced so far); see data/manual/README-ish
@@ -297,5 +390,7 @@ def build_offseason_features(start_season: int, end_season: int) -> pd.DataFrame
     features = features.merge(build_draft_capital_added(draft_picks), on=["season", "team"], how="left")
     features["draft_capital_added"] = features["draft_capital_added"].fillna(0.0)  # no picks that year = 0 added
     features = features.merge(build_skill_value_deltas(rosters), on=["season", "team"], how="left")
+    features = features.merge(build_defense_value_deltas(rosters), on=["season", "team"], how="left")
+    features["defense_value_delta"] = features["defense_value_delta"].fillna(0.0)  # no PFR def data before 2018
     features = features.merge(load_preseason_win_totals(), on=["season", "team"], how="left")
     return features[features["season"] > start_season].reset_index(drop=True)
