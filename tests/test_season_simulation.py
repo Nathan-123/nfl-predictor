@@ -4,6 +4,7 @@ integration test of the real Monte Carlo season simulation."""
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -23,6 +24,41 @@ from nfl_predictor.simulation import playoffs, season, standings
 )
 def test_margin_to_scores(margin, expected):
     assert season.margin_to_scores(margin) == expected
+
+
+def test_simulate_one_season_tie_rate_is_realistic_not_naive_rounding():
+    # An even matchup (predicted_margin=0) is the worst case for spurious
+    # ties -- naively rounding the continuous margin draw puts ~2.9% of its
+    # mass at exactly 0 (confirmed empirically), ~10x the real NFL rate
+    # (~0.28% of 2021+ games). The redraw-once fix in simulate_one_season
+    # should land close to that real rate, not the naive one.
+    #
+    # One single game per trial (not a repeated A-vs-B schedule): ratings
+    # update after every game, so a persistent single matchup runs away from
+    # the even starting point after a handful of games (whoever leads starts
+    # winning more), which would understate ties for the wrong reason. Each
+    # trial instead starts fresh at a true 1500-1500 coin flip.
+    schedule = pd.DataFrame([{"home_team": "A", "away_team": "B", "week": 1, "game_id": "g1"}])
+    rng = np.random.default_rng(0)
+    n_trials = 3000
+    ties = 0
+    for _ in range(n_trials):
+        standings_out, _ = season.simulate_one_season(
+            schedule=schedule,
+            starting_ratings={"A": 1500.0, "B": 1500.0},
+            hfa=0.0,
+            k=20.0,
+            margin_intercept=0.0,
+            margin_slope=0.04,
+            margin_std=13.2,
+            divisions={"A": "DIV", "B": "DIV"},
+            conferences={"A": "CONF", "B": "CONF"},
+            rng=rng,
+        )
+        ties += standings_out["A"].ties
+    tie_rate = ties / n_trials
+    assert tie_rate < 0.01  # well below the naive ~2.9%, in the real ~0.28% ballpark
+    assert ties > 0  # but not literally impossible either
 
 
 # ---- tiebreak logic (synthetic mini-league) ----------------------------------
@@ -146,6 +182,107 @@ def test_deterministic_bracket_produces_a_super_bowl_between_two_conferences():
     assert len(games) == 13  # 6 per conference + 1 Super Bowl
     assert sum(g.round == "Super Bowl" for g in games) == 1
     assert champion == "AFC1"
+
+
+# ---- representative simulation (real randomness, one chosen sim) -------------
+
+
+def _toy_league_of_14():
+    # run_simulations always runs a real playoff bracket, which needs exactly
+    # 7 seeded teams per conference: seed_conference takes the top team from
+    # EACH division as a division winner, then the best 3 non-winners as
+    # wildcards -- so 4 divisions per conference (sized 2,2,2,1) sum to
+    # 4 winners + 3 wildcards = 7, matching the real NFL's structure.
+    teams = [f"T{i}" for i in range(1, 15)]
+    div_sizes = [2, 2, 2, 1]
+    divisions = {}
+    for conf_idx in range(2):
+        conf_teams = teams[conf_idx * 7 : conf_idx * 7 + 7]
+        pos = 0
+        for div_idx, size in enumerate(div_sizes):
+            for t in conf_teams[pos : pos + size]:
+                divisions[t] = f"DIV_{conf_idx}_{div_idx}"
+            pos += size
+    conferences = {t: ("CONF_A" if i < 7 else "CONF_B") for i, t in enumerate(teams)}
+    starting_ratings = {t: 1500.0 + 5.0 * i for i, t in enumerate(teams)}
+    # Round-robin-ish: just enough games (3 weeks) for every team to have a
+    # nonzero, plausible record without needing a real 17-game schedule.
+    schedule_rows = []
+    game_id = 0
+    for week in range(1, 4):
+        shifted = teams[week:] + teams[:week]
+        for i in range(0, 14, 2):
+            game_id += 1
+            schedule_rows.append(
+                {"home_team": shifted[i], "away_team": shifted[i + 1], "week": week, "game_id": f"g{game_id}"}
+            )
+    return pd.DataFrame(schedule_rows), starting_ratings, divisions, conferences
+
+
+def test_run_simulations_omits_regular_season_details_by_default():
+    schedule, starting_ratings, divisions, conferences = _toy_league_of_14()
+    results = season.run_simulations(
+        n_sims=5,
+        schedule=schedule,
+        starting_ratings=starting_ratings,
+        hfa=25.0,
+        k=20.0,
+        margin_intercept=1.0,
+        margin_slope=0.04,
+        margin_std=10.0,
+        divisions=divisions,
+        conferences=conferences,
+        seed=1,
+    )
+    assert results.regular_season_details is None
+
+
+def test_run_simulations_keeps_regular_season_details_when_requested():
+    schedule, starting_ratings, divisions, conferences = _toy_league_of_14()
+    results = season.run_simulations(
+        n_sims=5,
+        schedule=schedule,
+        starting_ratings=starting_ratings,
+        hfa=25.0,
+        k=20.0,
+        margin_intercept=1.0,
+        margin_slope=0.04,
+        margin_std=10.0,
+        divisions=divisions,
+        conferences=conferences,
+        seed=1,
+        keep_regular_season_details=True,
+    )
+    assert len(results.regular_season_details) == 5
+    rec_standings, seeds_by_conference, final_ratings = results.regular_season_details[0]
+    assert rec_standings["T1"].wins + rec_standings["T1"].losses + rec_standings["T1"].ties == 3
+    assert len(seeds_by_conference["CONF_A"]) == 7
+    assert set(final_ratings) == set(starting_ratings)
+    # A win vector recomputed from the stored standings must match win_totals'
+    # own row for the same sim -- the two shouldn't be able to silently drift.
+    row = results.win_totals[(results.win_totals["sim"] == 0) & (results.win_totals["team"] == "T1")].iloc[0]
+    assert rec_standings["T1"].wins + 0.5 * rec_standings["T1"].ties == row["wins"]
+
+
+def test_simulate_playoffs_detailed_produces_a_full_bracket():
+    afc = [f"AFC{i}" for i in range(1, 8)]
+    nfc = [f"NFC{i}" for i in range(1, 8)]
+    ratings = {t: 1600.0 for t in afc + nfc}
+    games, champion = playoffs.simulate_playoffs_detailed(
+        seeds_by_conference={"AFC": afc, "NFC": nfc},
+        ratings=ratings,
+        hfa=0.0,
+        k=20.0,
+        margin_intercept=0.0,
+        margin_slope=0.05,
+        margin_std=10.0,
+        rng=np.random.default_rng(0),
+    )
+    assert len(games) == 13  # 6 per conference + 1 Super Bowl
+    assert sum(g.round == "Super Bowl" for g in games) == 1
+    assert champion in afc + nfc
+    assert games[-1].winner == champion
+    assert games[-1].home_seed is None and games[-1].away_seed is None  # Super Bowl has no "seed"
 
 
 # ---- integration: real projected 2026 season ---------------------------------

@@ -145,9 +145,6 @@ def simulate_playoffs(
     )
 
 
-# ---- deterministic ("model's best single guess") bracket, no RNG ------------
-
-
 @dataclass
 class BracketGame:
     round: str  # "Wild Card" | "Divisional" | "Conference Championship" | "Super Bowl"
@@ -157,6 +154,112 @@ class BracketGame:
     home_seed: int | None
     away_seed: int | None
     winner: str
+
+
+# ---- detailed replay: real random draws, but with the game-by-game bracket -
+# recorded (simulate_playoffs' hot-path version above only returns team
+# SETS reaching each round, which is enough for the aggregate Monte Carlo
+# counts but not enough to print an actual bracket for one chosen sim).
+
+
+def _simulate_conference_detailed(
+    conference: str,
+    seeds: list[str],
+    ratings: dict[str, float],
+    hfa: float,
+    k: float,
+    margin_intercept: float,
+    margin_slope: float,
+    margin_std: float,
+    rng: np.random.Generator,
+    games: list[BracketGame],
+) -> str:
+    """Same bracket structure and real random margin draws as
+    _simulate_conference, but also appends a BracketGame record for every
+    game played. See simulate_playoffs_detailed."""
+    seed_rank = {team: i + 1 for i, team in enumerate(seeds)}
+    args = (ratings, hfa, k, margin_intercept, margin_slope, margin_std, rng)
+
+    def play(round_name: str, home: str, away: str) -> str:
+        winner = _play_single_elim_game(home, away, *args)
+        games.append(
+            BracketGame(
+                round=round_name,
+                conference=conference,
+                home_team=home,
+                away_team=away,
+                home_seed=seed_rank[home],
+                away_seed=seed_rank[away],
+                winner=winner,
+            )
+        )
+        return winner
+
+    wc_pairs = [(seeds[1], seeds[6]), (seeds[2], seeds[5]), (seeds[3], seeds[4])]
+    wc_winners = [play("Wild Card", hi, lo) for hi, lo in wc_pairs]
+
+    surviving = sorted(wc_winners, key=lambda t: seed_rank[t])
+    lowest_survivor = surviving[-1]
+    other_two = surviving[:-1]
+
+    div_winner_1 = play("Divisional", seeds[0], lowest_survivor)
+    div_winner_2 = play("Divisional", other_two[0], other_two[1])
+
+    finalists = sorted([div_winner_1, div_winner_2], key=lambda t: seed_rank[t])
+    return play("Conference Championship", finalists[0], finalists[1])
+
+
+def simulate_playoffs_detailed(
+    seeds_by_conference: dict[str, list[str]],
+    ratings: dict[str, float],
+    hfa: float,
+    k: float,
+    margin_intercept: float,
+    margin_slope: float,
+    margin_std: float,
+    rng: np.random.Generator,
+) -> tuple[list[BracketGame], str]:
+    """The real-randomness counterpart to simulate_playoffs_deterministic:
+    same stochastic margin draws as simulate_playoffs (reuses the same
+    tested _play_single_elim_game), but returns the actual game-by-game
+    bracket instead of just team sets -- for building a human-readable
+    table out of ONE chosen, already-realistic simulation."""
+    games: list[BracketGame] = []
+    conference_champions = []
+    for conference, seeds in seeds_by_conference.items():
+        conference_champions.append(
+            _simulate_conference_detailed(
+                conference, seeds, ratings, hfa, k, margin_intercept, margin_slope, margin_std, rng, games
+            )
+        )
+
+    champion = _play_single_elim_game(
+        conference_champions[0],
+        conference_champions[1],
+        ratings,
+        hfa,
+        k,
+        margin_intercept,
+        margin_slope,
+        margin_std,
+        rng,
+        neutral=True,
+    )
+    games.append(
+        BracketGame(
+            round="Super Bowl",
+            conference=None,
+            home_team=conference_champions[0],
+            away_team=conference_champions[1],
+            home_seed=None,
+            away_seed=None,
+            winner=champion,
+        )
+    )
+    return games, champion
+
+
+# ---- deterministic ("model's best single guess") bracket, no RNG ------------
 
 
 def _play_single_elim_game_deterministic(

@@ -13,6 +13,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -20,16 +21,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from nfl_predictor.config import DEFAULT_REGRESSION_START_SEASON, DEFAULT_START_SEASON, PROCESSED_DIR
 from nfl_predictor.ratings.adjustment import fit_adjusted_elo_pipeline, project_upcoming_season
 from nfl_predictor.ratings.elo import DEFAULT_K
-from nfl_predictor.simulation.playoffs import simulate_playoffs_deterministic
+from nfl_predictor.simulation.playoffs import simulate_playoffs_detailed
 from nfl_predictor.simulation.season import (
     fit_margin_model,
     load_season_schedule,
     load_team_division_conference,
     project_starting_ratings,
     run_simulations,
-    simulate_one_season_deterministic,
 )
-from nfl_predictor.simulation.standings import seed_conference
 
 WIN_TOTALS_PATH = PROCESSED_DIR / "season_simulation_win_totals.parquet"
 SUMMARY_PATH = PROCESSED_DIR / "season_simulation_summary.parquet"
@@ -80,6 +79,7 @@ def main() -> None:
         divisions=divisions,
         conferences=conferences,
         seed=args.seed,
+        keep_regular_season_details=True,
     )
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,29 +103,22 @@ def main() -> None:
         display[col] = (display[col] * 100).round(1)
     print(display.to_string(index=False))
 
-    # ---- deterministic "model's best single guess" record + bracket --------
-    # A complement to the Monte Carlo summary above: one single, non-random
-    # run (each game goes to whoever the fitted margin model favors) gives
-    # one coherent final record and one coherent bracket, instead of the
-    # per-team/per-round probabilities the Monte Carlo output reports.
-    det_standings, det_ratings = simulate_one_season_deterministic(
-        schedule=schedule,
-        starting_ratings=starting_ratings,
-        hfa=pipeline.adjusted_summary.hfa_used,
-        k=DEFAULT_K,
-        margin_intercept=margin_intercept,
-        margin_slope=margin_slope,
-        divisions=divisions,
-        conferences=conferences,
-    )
+    # ---- one realistic representative simulation: record + bracket --------
+    # A complement to the Monte Carlo summary above, but built from a REAL
+    # simulated season (real random variance -- favorites do sometimes lose)
+    # rather than a no-randomness "favorite always wins" run, which produces
+    # unrealistic blowout records (16-1, 1-16) that don't match the summary's
+    # own mean_wins. Picked from the n_sims already run above: the single
+    # simulation whose per-team win total is closest (least squared error)
+    # to the aggregate summary's median_wins -- i.e. the most "typical" of
+    # the realistic seasons already drawn, not a fabricated extreme.
+    target_wins = results.summary.set_index("team")["median_wins"]
+    win_pivot = results.win_totals.pivot(index="sim", columns="team", values="wins")
+    squared_error = ((win_pivot - target_wins) ** 2).sum(axis=1)
+    representative_sim = int(squared_error.idxmin())
+    rep_standings, rep_seeds_by_conference, rep_ratings = results.regular_season_details[representative_sim]
 
-    conference_names = sorted(set(conferences.values()))
-    seeds_by_conference = {
-        conf: seed_conference([t for t in det_standings if conferences[t] == conf], divisions, det_standings)
-        for conf in conference_names
-    }
-    seed_lookup = {t: (conf, i + 1) for conf, seeds in seeds_by_conference.items() for i, t in enumerate(seeds)}
-
+    seed_lookup = {t: i + 1 for seeds in rep_seeds_by_conference.values() for i, t in enumerate(seeds)}
     record_rows = [
         {
             "team": team,
@@ -135,9 +128,9 @@ def main() -> None:
             "division": divisions[team],
             "conference": conferences[team],
             "made_playoffs": team in seed_lookup,
-            "seed": seed_lookup.get(team, (None, None))[1],
+            "seed": seed_lookup.get(team),
         }
-        for team, rec in det_standings.items()
+        for team, rec in rep_standings.items()
     ]
     record_df = (
         pd.DataFrame(record_rows)
@@ -146,21 +139,32 @@ def main() -> None:
     )
     record_df.to_csv(PROJECTED_RECORD_PATH, index=False)
 
-    print(f"\n{upcoming_season} projected final record (single best-guess run, no randomness):\n")
+    print(
+        f"\n{upcoming_season} projected final record "
+        f"(one representative simulation -- #{representative_sim} of {args.n_sims}, "
+        "closest to the summary's median win totals):\n"
+    )
     print(record_df.to_string(index=False))
 
-    bracket_games, champion = simulate_playoffs_deterministic(
-        seeds_by_conference=seeds_by_conference,
-        ratings=det_ratings,
+    # A fresh random draw for the playoffs, seeded from that same simulation's
+    # real final standings/ratings -- not a literal replay of sim #N's own
+    # postseason (which wasn't retained to save memory), but the same
+    # stochastic model applied to the same realistic regular season.
+    rng_playoff = np.random.default_rng(None if args.seed is None else args.seed + 1)
+    bracket_games, champion = simulate_playoffs_detailed(
+        seeds_by_conference=rep_seeds_by_conference,
+        ratings=dict(rep_ratings),
         hfa=pipeline.adjusted_summary.hfa_used,
         k=DEFAULT_K,
         margin_intercept=margin_intercept,
         margin_slope=margin_slope,
+        margin_std=margin_std,
+        rng=rng_playoff,
     )
     bracket_df = pd.DataFrame([asdict(g) for g in bracket_games])
     bracket_df.to_csv(PROJECTED_BRACKET_PATH, index=False)
 
-    print(f"\n{upcoming_season} projected playoff bracket (same deterministic run):\n")
+    print(f"\n{upcoming_season} projected playoff bracket (from that same representative simulation):\n")
     print(bracket_df.to_string(index=False))
     print(f"\nProjected Super Bowl champion: {champion}")
 

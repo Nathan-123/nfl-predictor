@@ -94,6 +94,17 @@ def simulate_one_season(
         home, away = game.home_team, game.away_team
         predicted_margin = margin_intercept + margin_slope * (ratings[home] - ratings[away])
         margin = int(round(rng.normal(predicted_margin, margin_std)))
+        if margin == 0:
+            # Real NFL games essentially never end in a genuine tie (~0.28%
+            # of 2021+ games, confirmed against the real game log) -- but
+            # naively rounding a continuous normal draw puts ~3% of its mass
+            # at exactly 0 for an even matchup, ~10x too often, because the
+            # model has no separate notion of "went to overtime" the way a
+            # real tied game does. Approximate that extra step cheaply: redraw
+            # once (the overtime period, another draw from the same margin
+            # model) and only accept a tie if THAT also lands on 0 -- lands
+            # close to the real rate without a separate overtime model.
+            margin = int(round(rng.normal(predicted_margin, margin_std)))
         home_score, away_score = margin_to_scores(margin)
 
         record_game(standings, home, away, home_score, away_score, divisions, conferences)
@@ -143,6 +154,12 @@ def simulate_one_season_deterministic(
 class SimulationResults:
     win_totals: pd.DataFrame  # one row per (sim, team): wins (ties count as 0.5)
     summary: pd.DataFrame  # one row per team: aggregated probabilities
+    # Present only when run_simulations(keep_regular_season_details=True): one
+    # (standings, seeds_by_conference, final_ratings) tuple per sim, in sim
+    # order -- lets a caller later pick one specific, already-simulated
+    # season (see scripts/run_season_simulation.py's "representative
+    # simulation") without re-running anything.
+    regular_season_details: list[tuple] | None = None
 
 
 def run_simulations(
@@ -157,6 +174,7 @@ def run_simulations(
     divisions: dict[str, str],
     conferences: dict[str, str],
     seed: int | None = None,
+    keep_regular_season_details: bool = False,
 ) -> SimulationResults:
     from nfl_predictor.simulation.playoffs import simulate_playoffs
 
@@ -165,6 +183,7 @@ def run_simulations(
     conference_names = sorted(set(conferences.values()))
 
     win_rows = []
+    regular_season_details = [] if keep_regular_season_details else None
     playoff_counts = {t: 0 for t in teams}
     division_counts = {t: 0 for t in teams}
     one_seed_counts = {t: 0 for t in teams}
@@ -191,6 +210,9 @@ def run_simulations(
             for t in seeds[:4]:
                 division_counts[t] += 1
             one_seed_counts[seeds[0]] += 1
+
+        if regular_season_details is not None:
+            regular_season_details.append((standings, seeds_by_conference, dict(final_ratings)))
 
         playoff_result = simulate_playoffs(
             seeds_by_conference, final_ratings, hfa, k, margin_intercept, margin_slope, margin_std, rng
@@ -222,4 +244,4 @@ def run_simulations(
         }
     ).sort_values("mean_wins", ascending=False).reset_index(drop=True)
 
-    return SimulationResults(win_totals=win_totals, summary=summary)
+    return SimulationResults(win_totals=win_totals, summary=summary, regular_season_details=regular_season_details)
