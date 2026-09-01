@@ -20,6 +20,7 @@ DEFAULT_START_SEASON = 2021
 MIN_SEASON = {
     "injuries": 2009,
     "pfr_def_stats": 2018,
+    "snap_counts": 2013,
 }
 
 # Datasets that should ALWAYS be fetched further back than a run's requested

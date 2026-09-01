@@ -65,7 +65,8 @@ def main() -> None:
     if projected:
         preview = pd.DataFrame({"team": list(projected.keys()), "projected_adjustment": list(projected.values())})
         print(f"\nProjected {upcoming_season} preseason adjustment (Elo points, informational only --")
-        print(" QB continuity can't be confirmed until Week 1 starters are known):")
+        print(" qb_value_delta uses a presumptive starter, by prior-season dropback volume, for")
+        print(" any team without a real confirmed Week-1 starter yet):")
         print(preview.sort_values("projected_adjustment", ascending=False).to_string(index=False))
 
 

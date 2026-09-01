@@ -70,6 +70,19 @@ def fetch_pfr_def_stats(years: list[int]) -> pd.DataFrame:
     return nfl.import_seasonal_pfr("def", years)
 
 
+def fetch_snap_counts(years: list[int]) -> pd.DataFrame:
+    return nfl.import_snap_counts(years)
+
+
+def fetch_player_ids(years: list[int]) -> pd.DataFrame:
+    """A community-maintained (DynastyProcess) cross-site player ID table --
+    not partitioned by season (years is ignored, same as team_desc). Used as
+    a *secondary* pfr_id crosswalk in ratings/offseason_features.py, since
+    it's a source independent of rosters.parquet's own pfr_id column and
+    fills a meaningful chunk of that column's gaps."""
+    return nfl.import_ids()
+
+
 # Registry consumed by the pipeline orchestrator. Keys double as the
 # --datasets CLI values and the output parquet filenames.
 DATASETS = {
@@ -85,4 +98,6 @@ DATASETS = {
     "win_totals": fetch_win_totals,
     "pbp": fetch_pbp,
     "pfr_def_stats": fetch_pfr_def_stats,
+    "snap_counts": fetch_snap_counts,
+    "player_ids": fetch_player_ids,
 }

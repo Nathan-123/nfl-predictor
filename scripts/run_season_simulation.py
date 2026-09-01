@@ -10,23 +10,31 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import asdict
 from pathlib import Path
+
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nfl_predictor.config import DEFAULT_REGRESSION_START_SEASON, DEFAULT_START_SEASON, PROCESSED_DIR
 from nfl_predictor.ratings.adjustment import fit_adjusted_elo_pipeline, project_upcoming_season
 from nfl_predictor.ratings.elo import DEFAULT_K
+from nfl_predictor.simulation.playoffs import simulate_playoffs_deterministic
 from nfl_predictor.simulation.season import (
     fit_margin_model,
     load_season_schedule,
     load_team_division_conference,
     project_starting_ratings,
     run_simulations,
+    simulate_one_season_deterministic,
 )
+from nfl_predictor.simulation.standings import seed_conference
 
 WIN_TOTALS_PATH = PROCESSED_DIR / "season_simulation_win_totals.parquet"
 SUMMARY_PATH = PROCESSED_DIR / "season_simulation_summary.parquet"
+PROJECTED_RECORD_PATH = PROCESSED_DIR / "projected_final_record.csv"
+PROJECTED_BRACKET_PATH = PROCESSED_DIR / "projected_playoff_bracket.csv"
 
 
 def parse_args() -> argparse.Namespace:
@@ -94,6 +102,70 @@ def main() -> None:
     for col in pct_cols:
         display[col] = (display[col] * 100).round(1)
     print(display.to_string(index=False))
+
+    # ---- deterministic "model's best single guess" record + bracket --------
+    # A complement to the Monte Carlo summary above: one single, non-random
+    # run (each game goes to whoever the fitted margin model favors) gives
+    # one coherent final record and one coherent bracket, instead of the
+    # per-team/per-round probabilities the Monte Carlo output reports.
+    det_standings, det_ratings = simulate_one_season_deterministic(
+        schedule=schedule,
+        starting_ratings=starting_ratings,
+        hfa=pipeline.adjusted_summary.hfa_used,
+        k=DEFAULT_K,
+        margin_intercept=margin_intercept,
+        margin_slope=margin_slope,
+        divisions=divisions,
+        conferences=conferences,
+    )
+
+    conference_names = sorted(set(conferences.values()))
+    seeds_by_conference = {
+        conf: seed_conference([t for t in det_standings if conferences[t] == conf], divisions, det_standings)
+        for conf in conference_names
+    }
+    seed_lookup = {t: (conf, i + 1) for conf, seeds in seeds_by_conference.items() for i, t in enumerate(seeds)}
+
+    record_rows = [
+        {
+            "team": team,
+            "wins": rec.wins,
+            "losses": rec.losses,
+            "ties": rec.ties,
+            "division": divisions[team],
+            "conference": conferences[team],
+            "made_playoffs": team in seed_lookup,
+            "seed": seed_lookup.get(team, (None, None))[1],
+        }
+        for team, rec in det_standings.items()
+    ]
+    record_df = (
+        pd.DataFrame(record_rows)
+        .sort_values(["made_playoffs", "wins"], ascending=[False, False])
+        .reset_index(drop=True)
+    )
+    record_df.to_csv(PROJECTED_RECORD_PATH, index=False)
+
+    print(f"\n{upcoming_season} projected final record (single best-guess run, no randomness):\n")
+    print(record_df.to_string(index=False))
+
+    bracket_games, champion = simulate_playoffs_deterministic(
+        seeds_by_conference=seeds_by_conference,
+        ratings=det_ratings,
+        hfa=pipeline.adjusted_summary.hfa_used,
+        k=DEFAULT_K,
+        margin_intercept=margin_intercept,
+        margin_slope=margin_slope,
+    )
+    bracket_df = pd.DataFrame([asdict(g) for g in bracket_games])
+    bracket_df.to_csv(PROJECTED_BRACKET_PATH, index=False)
+
+    print(f"\n{upcoming_season} projected playoff bracket (same deterministic run):\n")
+    print(bracket_df.to_string(index=False))
+    print(f"\nProjected Super Bowl champion: {champion}")
+
+    print(f"\nSaved: {PROJECTED_RECORD_PATH}")
+    print(f"Saved: {PROJECTED_BRACKET_PATH}")
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
         "--hfa", type=float, default=None, help="Home-field-advantage Elo points. Default: estimate from data."
     )
     parser.add_argument(
-        "--regress", type=float, default=1 / 3, help="Fraction of each team's rating pulled back to the mean each offseason."
+        "--regress", type=float, default=0.4, help="Fraction of each team's rating pulled back to the mean each offseason."
     )
     return parser.parse_args()
 

@@ -75,7 +75,7 @@ def run(
     end_season: int | None = None,
     k: float = DEFAULT_K,
     hfa: float | None = None,
-    regress_frac: float = 1 / 3,
+    regress_frac: float = 0.4,
     season_adjustments: dict[tuple[int, str], float] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, BacktestSummary]:
     """Replay every played game from start_season..end_season in order,

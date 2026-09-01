@@ -22,6 +22,7 @@ FEATURE_COLS = [
     "skill_value_delta",
     "special_teams_value_delta",
     "defense_value_delta",
+    "preseason_win_total",
 ]
 
 # When fitting on a widened regression window, discard transitions from the
@@ -29,6 +30,16 @@ FEATURE_COLS = [
 # to move off the synthetic 1500 starting point before a "rating_change" is
 # a meaningful target rather than warm-up noise.
 ELO_WARMUP_SEASONS = 4
+
+# project_upcoming_season's fallback for a feature missing on the upcoming
+# season's row (e.g. a season whose preseason_win_total hasn't been sourced
+# yet). 0.0 is the right "no signal" neutral for every OTHER feature here --
+# they're all deltas centered near zero -- but 0.0 for preseason_win_total
+# would mean "expected to go 0-17", a false and extremely negative signal,
+# not a neutral one. 8.5 (half of a 17-game season) is the actual neutral
+# point for a raw win total.
+FEATURE_FALLBACK = {col: 0.0 for col in FEATURE_COLS}
+FEATURE_FALLBACK["preseason_win_total"] = 8.5
 
 
 @dataclass
@@ -116,9 +127,9 @@ def project_upcoming_season(
     (e.g. next season), using the model fit on all available history --
     there's nothing to leave out for a season that hasn't happened. Missing
     features (e.g. QB continuity before Week 1 starters are known) fall back
-    to a neutral 0."""
+    to each feature's own neutral point -- see FEATURE_FALLBACK."""
     upcoming = features[features["season"] == upcoming_season].copy()
-    upcoming[FEATURE_COLS] = upcoming[FEATURE_COLS].fillna(0.0)
+    upcoming[FEATURE_COLS] = upcoming[FEATURE_COLS].fillna(FEATURE_FALLBACK)
     upcoming["projected_adjustment"] = predict(full_model, upcoming)
     return dict(zip(upcoming["team"], upcoming["projected_adjustment"]))
 

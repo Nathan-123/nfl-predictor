@@ -53,10 +53,13 @@ def update_ratings(
     return elo_home + shift, elo_away - shift
 
 
-def regress_to_mean(rating: float, mean: float = DEFAULT_MEAN, regress_frac: float = 1 / 3) -> float:
+def regress_to_mean(rating: float, mean: float = DEFAULT_MEAN, regress_frac: float = 0.4) -> float:
     """Season-carryover mean reversion: pull `rating` a fraction of the way
-    back toward the league mean. regress_frac=1/3 means "lose a third of
-    your distance from average" -- the standard Elo off-season treatment."""
+    back toward the league mean. Default 0.4 (not the more textbook 1/3):
+    a sweep of regress_frac against the real 2021+ backtest found 0.4-0.5
+    modestly outperforming 1/3 (0.2247/0.2245 vs 0.2249 Brier), a shallow
+    but consistent improvement -- picked 0.4 rather than the single best
+    point (0.5) to avoid over-fitting one sweep on a small sample."""
     return rating - regress_frac * (rating - mean)
 
 

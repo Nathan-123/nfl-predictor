@@ -5,6 +5,7 @@ The integration test only *reads* data/raw/schedules.parquet -- read-only
 access is safe and does not need the isolation fixture in test_pipeline.py.
 """
 
+import inspect
 import sys
 from pathlib import Path
 
@@ -95,6 +96,17 @@ def test_regress_to_mean_pulls_toward_average():
 
 def test_regress_to_mean_leaves_average_team_unchanged():
     assert elo.regress_to_mean(1500, mean=1500, regress_frac=1 / 3) == pytest.approx(1500)
+
+
+def test_regress_to_mean_default_fraction_is_point_four():
+    # Updated from 1/3 after a sweep against the real backtest found 0.4-0.5
+    # modestly outperforming 1/3 -- see elo.py's docstring for the numbers.
+    assert elo.regress_to_mean(1800, mean=1500) == pytest.approx(1680)
+
+
+def test_pipeline_run_default_regress_frac_matches_elo_default():
+    # Both defaults were updated together; catch them drifting apart.
+    assert inspect.signature(run_elo).parameters["regress_frac"].default == pytest.approx(0.4)
 
 
 # ---- hfa_from_home_win_rate -------------------------------------------------

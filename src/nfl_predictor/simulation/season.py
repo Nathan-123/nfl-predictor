@@ -102,6 +102,43 @@ def simulate_one_season(
     return standings, ratings
 
 
+def simulate_one_season_deterministic(
+    schedule: pd.DataFrame,
+    starting_ratings: dict[str, float],
+    hfa: float,
+    k: float,
+    margin_intercept: float,
+    margin_slope: float,
+    divisions: dict[str, str],
+    conferences: dict[str, str],
+):
+    """One single, non-random pass through the schedule: each game's winner
+    is whichever team the fitted margin model favors (no draw from the
+    residual distribution), so this answers "what does the model expect to
+    happen" rather than run_simulations' "how likely is each outcome" --
+    a complementary, single coherent win-loss record and (fed into
+    simulate_playoffs_deterministic) a single coherent bracket, not an
+    aggregate over many random draws.
+
+    A predicted_margin that rounds to exactly 0 (only possible from a
+    near-exact rating tie) is broken toward the home team, consistent with
+    margin_intercept already encoding a real average home-field scoring
+    edge from the same historical fit."""
+    ratings = dict(starting_ratings)
+    standings = new_standings(list(ratings.keys()))
+
+    for game in schedule.itertuples(index=False):
+        home, away = game.home_team, game.away_team
+        predicted_margin = margin_intercept + margin_slope * (ratings[home] - ratings[away])
+        margin = int(round(predicted_margin)) or 1
+        home_score, away_score = margin_to_scores(margin)
+
+        record_game(standings, home, away, home_score, away_score, divisions, conferences)
+        ratings[home], ratings[away] = update_ratings(ratings[home], ratings[away], home_score, away_score, hfa, k)
+
+    return standings, ratings
+
+
 @dataclass
 class SimulationResults:
     win_totals: pd.DataFrame  # one row per (sim, team): wins (ties count as 0.5)

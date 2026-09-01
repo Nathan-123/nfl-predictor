@@ -143,3 +143,125 @@ def simulate_playoffs(
         super_bowl_teams=super_bowl_teams,
         champion=champion,
     )
+
+
+# ---- deterministic ("model's best single guess") bracket, no RNG ------------
+
+
+@dataclass
+class BracketGame:
+    round: str  # "Wild Card" | "Divisional" | "Conference Championship" | "Super Bowl"
+    conference: str | None  # None for the Super Bowl
+    home_team: str
+    away_team: str
+    home_seed: int | None
+    away_seed: int | None
+    winner: str
+
+
+def _play_single_elim_game_deterministic(
+    home: str,
+    away: str,
+    ratings: dict[str, float],
+    hfa: float,
+    k: float,
+    margin_intercept: float,
+    margin_slope: float,
+    neutral: bool = False,
+) -> tuple[str, int]:
+    """Same no-RNG "model's point estimate wins" rule as
+    season.simulate_one_season_deterministic (see that docstring for the
+    margin==0 tie-break); returns (winner, home_score - away_score) for
+    display."""
+    effective_hfa = 0.0 if neutral else hfa
+    effective_intercept = 0.0 if neutral else margin_intercept
+
+    predicted_margin = effective_intercept + margin_slope * (ratings[home] - ratings[away])
+    margin = int(round(predicted_margin)) or 1
+
+    home_score, away_score = margin_to_scores(margin)
+    ratings[home], ratings[away] = update_ratings(ratings[home], ratings[away], home_score, away_score, effective_hfa, k)
+    winner = home if home_score > away_score else away
+    return winner, margin
+
+
+def _simulate_conference_deterministic(
+    conference: str,
+    seeds: list[str],
+    ratings: dict[str, float],
+    hfa: float,
+    k: float,
+    margin_intercept: float,
+    margin_slope: float,
+    games: list[BracketGame],
+) -> str:
+    """seeds: 7 team codes, best (1) to worst (7). Appends every game played
+    to `games` (in place) and returns the conference champion."""
+    seed_rank = {team: i + 1 for i, team in enumerate(seeds)}
+
+    def play(round_name: str, home: str, away: str) -> str:
+        winner, _ = _play_single_elim_game_deterministic(home, away, ratings, hfa, k, margin_intercept, margin_slope)
+        games.append(
+            BracketGame(
+                round=round_name,
+                conference=conference,
+                home_team=home,
+                away_team=away,
+                home_seed=seed_rank[home],
+                away_seed=seed_rank[away],
+                winner=winner,
+            )
+        )
+        return winner
+
+    # Wild Card: 2v7, 3v6, 4v5 (better seed hosts); #1 seed has a bye.
+    wc_pairs = [(seeds[1], seeds[6]), (seeds[2], seeds[5]), (seeds[3], seeds[4])]
+    wc_winners = [play("Wild Card", hi, lo) for hi, lo in wc_pairs]
+
+    # Divisional re-seeding (real NFL rule): #1 seed plays the worst-seeded
+    # survivor; the other two survivors play each other, better seed hosting.
+    surviving = sorted(wc_winners, key=lambda t: seed_rank[t])
+    lowest_survivor = surviving[-1]
+    other_two = surviving[:-1]
+
+    div_winner_1 = play("Divisional", seeds[0], lowest_survivor)
+    div_winner_2 = play("Divisional", other_two[0], other_two[1])
+
+    finalists = sorted([div_winner_1, div_winner_2], key=lambda t: seed_rank[t])
+    return play("Conference Championship", finalists[0], finalists[1])
+
+
+def simulate_playoffs_deterministic(
+    seeds_by_conference: dict[str, list[str]],
+    ratings: dict[str, float],
+    hfa: float,
+    k: float,
+    margin_intercept: float,
+    margin_slope: float,
+) -> tuple[list[BracketGame], str]:
+    """The no-RNG counterpart to simulate_playoffs: seeds_by_conference and
+    `ratings` should come from season.simulate_one_season_deterministic's
+    own output, not a Monte Carlo sim's. Returns (every game played
+    including the Super Bowl, champion)."""
+    games: list[BracketGame] = []
+    conference_champions = []
+    for conference, seeds in seeds_by_conference.items():
+        conference_champions.append(
+            _simulate_conference_deterministic(conference, seeds, ratings, hfa, k, margin_intercept, margin_slope, games)
+        )
+
+    champion, _ = _play_single_elim_game_deterministic(
+        conference_champions[0], conference_champions[1], ratings, hfa, k, margin_intercept, margin_slope, neutral=True
+    )
+    games.append(
+        BracketGame(
+            round="Super Bowl",
+            conference=None,
+            home_team=conference_champions[0],
+            away_team=conference_champions[1],
+            home_seed=None,
+            away_seed=None,
+            winner=champion,
+        )
+    )
+    return games, champion

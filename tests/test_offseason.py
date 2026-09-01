@@ -94,6 +94,85 @@ def test_qb_value_delta_reflects_prior_season_performance(tmp_path, monkeypatch)
     assert deltas.loc[(2022, "TEAM"), "qb_value_delta"] == pytest.approx(2**0.5)
 
 
+# ---- presumptive starter fallback (for a season with no real Week-1 data yet) --
+
+
+def test_presumptive_starter_picks_higher_prior_season_volume():
+    qb_values = pd.DataFrame(
+        [
+            {"season": 2021, "passer_id": "backup", "epa_per_dropback": 0.0, "n_dropbacks": 20},
+            {"season": 2021, "passer_id": "starter", "epa_per_dropback": 0.0, "n_dropbacks": 400},
+        ]
+    )
+    rosters = _fake_rosters(
+        [
+            {"season": 2022, "team": "TEAM", "player_id": "backup", "position": "QB"},
+            {"season": 2022, "team": "TEAM", "player_id": "starter", "position": "QB"},
+        ]
+    )
+    presumptive = offseason_features.build_presumptive_starters(rosters, qb_values).set_index(["season", "team"])
+    assert presumptive.loc[(2022, "TEAM"), "qb_id"] == "starter"
+
+
+def test_qb_value_delta_falls_back_to_presumptive_starter_for_unplayed_season(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "PBP_DIR", tmp_path)
+
+    def make_pbp(season: int, rows: list[dict]) -> None:
+        pd.DataFrame(rows).to_parquet(tmp_path / f"{season}.parquet", index=False)
+
+    # 2021: real season, TEAM started "old". 2022 hasn't been played -- no
+    # schedule row for it at all, only a roster listing two candidate QBs.
+    make_pbp(
+        2021,
+        [{"passer_id": "old", "qb_dropback": 1, "qb_epa": -0.1}] * 200
+        + [{"passer_id": "new", "qb_dropback": 1, "qb_epa": 0.3}] * 200
+        + [{"passer_id": "third_stringer", "qb_dropback": 1, "qb_epa": 0.5}] * 5,  # too few dropbacks to matter
+    )
+    schedules = _fake_schedules(
+        [{"season": 2021, "home_team": "TEAM", "away_team": "OPP", "home_qb_id": "old", "away_qb_id": "zzz"}]
+    )
+    rosters = _fake_rosters(
+        [
+            {"season": 2022, "team": "TEAM", "player_id": "new", "position": "QB"},
+            {"season": 2022, "team": "TEAM", "player_id": "third_stringer", "position": "QB"},
+        ]
+    )
+    deltas = offseason_features.build_qb_value_deltas(schedules, rosters).set_index(["season", "team"])
+    # Same expected math as the real-Week-1-data test above: "new" (0.3) picked
+    # over "third_stringer" (too few dropbacks to be qualified) as presumptive
+    # starter, compared against "old" (-0.1), the real 2021 starter.
+    assert deltas.loc[(2022, "TEAM"), "qb_value_delta"] == pytest.approx(2**0.5)
+
+
+def test_qb_value_delta_prefers_real_data_over_presumptive_starter(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "PBP_DIR", tmp_path)
+
+    def make_pbp(season: int, rows: list[dict]) -> None:
+        pd.DataFrame(rows).to_parquet(tmp_path / f"{season}.parquet", index=False)
+
+    make_pbp(
+        2021,
+        [{"passer_id": "old", "qb_dropback": 1, "qb_epa": -0.1}] * 200
+        + [{"passer_id": "bench_qb", "qb_dropback": 1, "qb_epa": 0.9}] * 200,  # huge volume, but didn't start 2022
+    )
+    # 2022 WAS played, and "old" started again (real data) -- even though the
+    # roster also lists a higher-volume "bench_qb", real data must win.
+    schedules = _fake_schedules(
+        [
+            {"season": 2021, "home_team": "TEAM", "away_team": "OPP", "home_qb_id": "old", "away_qb_id": "zzz"},
+            {"season": 2022, "home_team": "TEAM", "away_team": "OPP", "home_qb_id": "old", "away_qb_id": "zzz"},
+        ]
+    )
+    rosters = _fake_rosters(
+        [
+            {"season": 2022, "team": "TEAM", "player_id": "old", "position": "QB"},
+            {"season": 2022, "team": "TEAM", "player_id": "bench_qb", "position": "QB"},
+        ]
+    )
+    deltas = offseason_features.build_qb_value_deltas(schedules, rosters).set_index(["season", "team"])
+    assert deltas.loc[(2022, "TEAM"), "qb_value_delta"] == pytest.approx(0.0)  # same starter, real data confirms it
+
+
 # ---- era normalization (synthetic pbp, two eras with different spreads) ----
 
 
@@ -301,6 +380,91 @@ def test_special_teams_value_delta_positive_when_team_gains_a_productive_kicker(
 def _fake_pfr_def_stats(tmp_path, rows: list[dict]) -> None:
     defaults = {"int": 0.0, "prss": 0.0, "rat": 90.0, "tgt": 0.0, "comb": 0.0}
     pd.DataFrame([{**defaults, **r} for r in rows]).to_parquet(tmp_path / "pfr_def_stats.parquet", index=False)
+
+
+def _fake_snap_counts(tmp_path, rows: list[dict]) -> None:
+    pd.DataFrame(rows).to_parquet(tmp_path / "snap_counts.parquet", index=False)
+
+
+def _fake_player_ids(tmp_path, rows: list[dict]) -> None:
+    pd.DataFrame(rows).to_parquet(tmp_path / "player_ids.parquet", index=False)
+
+
+def test_secondary_pfr_crosswalk_fills_gaps_without_overriding_real_data(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "DATA_DIR", tmp_path)
+    _fake_player_ids(
+        tmp_path,
+        [
+            {"gsis_id": "p_missing", "pfr_id": "recovered_from_secondary"},
+            # Should be ignored -- rosters already has a real pfr_id for this player.
+            {"gsis_id": "p_has_real", "pfr_id": "wrong_should_not_be_used"},
+        ],
+    )
+    rosters = _fake_rosters(
+        [
+            {"season": 2022, "team": "TEAM", "player_id": "p_missing", "pfr_id": None, "position": "DE"},
+            {"season": 2022, "team": "TEAM", "player_id": "p_has_real", "pfr_id": "real_pfr_id", "position": "DE"},
+        ]
+    )
+    filled = offseason_features._with_secondary_pfr_ids(rosters).set_index("player_id")["pfr_id"]
+    assert filled.loc["p_missing"] == "recovered_from_secondary"
+    assert filled.loc["p_has_real"] == "real_pfr_id"  # real rosters.parquet data always wins
+
+
+def test_defense_value_delta_picks_up_player_only_findable_via_secondary_crosswalk(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "DATA_DIR", tmp_path)
+    _fake_pfr_def_stats(
+        tmp_path,
+        [{"season": 2021, "pfr_id": f"avg{i}", "prss": 3, "rat": 90.0, "tgt": 20, "comb": 40} for i in range(1, 5)]
+        + [{"season": 2021, "pfr_id": "star", "prss": 25, "int": 2, "rat": 90.0, "tgt": 20, "comb": 40}],
+    )
+    _fake_player_ids(tmp_path, [{"gsis_id": "p_star", "pfr_id": "star"}])
+    rosters = _fake_rosters(
+        [
+            {"season": 2021, "team": "OTHER1", "player_id": "p_avg1", "pfr_id": "avg1", "position": "CB"},
+            {"season": 2021, "team": "OTHER2", "player_id": "p_avg2", "pfr_id": "avg2", "position": "CB"},
+            {"season": 2021, "team": "OTHER3", "player_id": "p_avg3", "pfr_id": "avg3", "position": "CB"},
+            {"season": 2021, "team": "OTHER4", "player_id": "p_avg4", "pfr_id": "avg4", "position": "CB"},
+            {"season": 2021, "team": "RIVAL", "player_id": "p_star", "pfr_id": None, "position": "DE"},
+            # rosters.parquet's own pfr_id is missing for "p_star" -- only the
+            # secondary crosswalk (player_ids.parquet) knows their pfr_id.
+            {"season": 2022, "team": "TEAM", "player_id": "p_star", "pfr_id": None, "position": "DE"},
+        ]
+    )
+    deltas = offseason_features.build_defense_value_deltas(rosters).set_index(["season", "team"])
+    assert deltas.loc[(2022, "TEAM"), "defense_value_delta"] > 0  # not silently dropped for lack of a pfr_id
+
+
+def test_defensive_value_zeroed_for_thin_snap_sample(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "DATA_DIR", tmp_path)
+    _fake_pfr_def_stats(
+        tmp_path,
+        [
+            # Huge raw stats, but from a tiny number of snaps -- shouldn't be trusted.
+            {"season": 2021, "pfr_id": "small_sample_stud", "prss": 30, "rat": 90.0, "tgt": 20, "comb": 40},
+            {"season": 2021, "pfr_id": "regular", "prss": 5, "rat": 90.0, "tgt": 20, "comb": 40},
+        ],
+    )
+    _fake_snap_counts(
+        tmp_path,
+        [
+            {"season": 2021, "pfr_player_id": "small_sample_stud", "defense_snaps": 20},
+            {"season": 2021, "pfr_player_id": "regular", "defense_snaps": 500},
+            # "regular"'s snaps split across two games, must be summed to a season total.
+            {"season": 2021, "pfr_player_id": "regular", "defense_snaps": 200},
+        ],
+    )
+    values = offseason_features.compute_defensive_value_by_season([2021]).set_index("pfr_id")["defensive_value"]
+    assert values.loc["small_sample_stud"] == 0.0  # below MIN_DEFENSIVE_SNAPS, zeroed regardless of raw stats
+    assert values.loc["regular"] != 0.0  # 700 total snaps, well above threshold, trusted
+
+
+def test_defensive_value_zeroed_when_no_snap_record_at_all(tmp_path, monkeypatch):
+    monkeypatch.setattr(offseason_features, "DATA_DIR", tmp_path)
+    _fake_pfr_def_stats(tmp_path, [{"season": 2021, "pfr_id": "no_snap_record", "prss": 30, "rat": 90.0, "tgt": 20, "comb": 40}])
+    _fake_snap_counts(tmp_path, [{"season": 2021, "pfr_player_id": "someone_else", "defense_snaps": 500}])
+    values = offseason_features.compute_defensive_value_by_season([2021]).set_index("pfr_id")["defensive_value"]
+    assert values.loc["no_snap_record"] == 0.0  # missing snap data treated as 0 snaps, not "trust the stat line"
 
 
 def test_defensive_value_rewards_pressure_and_penalizes_bad_coverage(tmp_path, monkeypatch):
