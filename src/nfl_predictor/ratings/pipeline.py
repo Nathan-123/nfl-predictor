@@ -47,9 +47,8 @@ def _load_played_games(start_season: int, end_season: int | None) -> pd.DataFram
     df = df[df["season"] >= start_season]
     if end_season is not None:
         df = df[df["season"] <= end_season]
-    # No-op for 2021+ (already standard codes); gives relocated franchises
-    # (Rams/Chargers/Raiders) continuous identity across their old/new codes
-    # when this is run further back in history.
+    # Only matters when running further back than 2021: keeps relocated
+    # franchises (Rams/Chargers/Raiders) under one code across the move.
     df = canonicalize_teams(df, ["home_team", "away_team"])
     return df.sort_values(["season", "week", "gameday"]).reset_index(drop=True)
 
@@ -78,19 +77,18 @@ def run(
     regress_frac: float = 0.4,
     season_adjustments: dict[tuple[int, str], float] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, BacktestSummary]:
-    """Replay every played game from start_season..end_season in order,
-    tracking Elo ratings. Returns (game_log, current_ratings, backtest).
+    """Replays every played game from start_season through end_season in
+    order, tracking Elo ratings. Returns (game_log, current_ratings, backtest).
 
-    hfa=None estimates home-field advantage empirically from this same
-    dataset's home win rate (see elo.hfa_from_home_win_rate) rather than
-    hardcoding a constant -- note this means the estimate has "seen" the
-    full sample rather than being purely out-of-sample, a standard practical
-    simplification for this stage.
+    hfa=None estimates home-field advantage from this same dataset's home
+    win rate (see elo.hfa_from_home_win_rate) instead of hardcoding a
+    constant. That estimate technically sees the full sample rather than
+    being purely out-of-sample, which is a fine simplification at this stage.
 
-    season_adjustments: optional {(season, team): elo_points} applied on top
-    of the regular regress_to_mean shift at each season boundary -- see
-    ratings/adjustment.py, which fits these from offseason signals
-    (coaching change, QB continuity, draft capital).
+    season_adjustments: optional {(season, team): elo_points}, applied on
+    top of the usual regress_to_mean shift at each season boundary. Fit in
+    ratings/adjustment.py from offseason signals like coaching changes, QB
+    continuity, and draft capital.
     """
     games = _load_played_games(start_season, end_season)
     if games.empty:

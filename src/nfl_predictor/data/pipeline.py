@@ -43,11 +43,12 @@ def _save_manifest(manifest: dict) -> None:
 
 
 def _fetch_with_trailing_year_fallback(fetch_fn, years: list[int], name: str):
-    """Call fetch_fn(years), retrying with the most recent season dropped each
-    time it errors. Datasets like weekly stats/injuries have no published
-    file yet for a season that hasn't started/finished, which nfl_data_py
-    surfaces as an HTTP 404 for the *whole* multi-year request -- rather than
-    hardcoding a cutoff, just back off a season at a time until it works.
+    """Calls fetch_fn(years), retrying with the most recent season dropped
+    each time it errors. Datasets like weekly stats/injuries have no
+    published file yet for a season that hasn't started or finished, which
+    nfl_data_py surfaces as an HTTP 404 for the whole multi-year request.
+    Rather than hardcoding a cutoff, this just backs off a season at a time
+    until the request succeeds.
     """
     remaining = list(years)
     dropped: list[int] = []

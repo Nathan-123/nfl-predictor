@@ -28,7 +28,7 @@ def test_rolling_epa_excludes_the_games_own_plays(tmp_path, monkeypatch):
         pd.DataFrame([{**defaults, **r} for r in rows]).to_parquet(tmp_path / f"{season}.parquet", index=False)
 
     # TEAM's game 1: bad (epa -1); game 2: great (epa +5, should NOT show up
-    # in game 2's own rolling feature -- only game 1's -1 should).
+    # in game 2's own rolling feature; only game 1's -1 should).
     make_pbp(
         2021,
         [

@@ -1,8 +1,8 @@
 """Unit tests for the pure Elo math (elo.py) plus one integration test that
 replays the real cached schedule history and sanity-checks the backtest.
 
-The integration test only *reads* data/raw/schedules.parquet -- read-only
-access is safe and does not need the isolation fixture in test_pipeline.py.
+The integration test only reads data/raw/schedules.parquet; read-only
+access is safe and doesn't need the isolation fixture in test_pipeline.py.
 """
 
 import inspect
@@ -73,7 +73,7 @@ def test_winner_rating_increases():
 
 
 def test_upset_moves_ratings_more_than_expected_result():
-    # Huge underdog (home, -300 gap) wins outright vs. a pick'em game -- the
+    # Huge underdog (home, -300 gap) wins outright vs. a pick'em game. The
     # upset should be a bigger rating swing than an even-money result.
     _, upset_away = elo.update_ratings(1200, 1500, home_score=20, away_score=17, hfa=0, k=20)
     _, coinflip_away = elo.update_ratings(1500, 1500, home_score=20, away_score=17, hfa=0, k=20)
@@ -100,7 +100,7 @@ def test_regress_to_mean_leaves_average_team_unchanged():
 
 def test_regress_to_mean_default_fraction_is_point_four():
     # Updated from 1/3 after a sweep against the real backtest found 0.4-0.5
-    # modestly outperforming 1/3 -- see elo.py's docstring for the numbers.
+    # modestly outperforming 1/3; see elo.py's docstring for the numbers.
     assert elo.regress_to_mean(1800, mean=1500) == pytest.approx(1680)
 
 
@@ -132,7 +132,7 @@ def test_pipeline_runs_on_real_history_and_beats_the_coinflip_baseline():
     assert summary.elo_log_loss < summary.baseline_log_loss
 
     # Ratings should have spread out from the 1500 starting point but stay
-    # in a sane range -- no runaway blowup from a bug in the update math.
+    # in a sane range, with no runaway blowup from a bug in the update math.
     assert current_ratings["elo_rating"].between(1000, 2000).all()
     assert len(current_ratings) == 32  # all NFL teams present
 

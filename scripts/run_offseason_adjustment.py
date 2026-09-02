@@ -57,7 +57,7 @@ def main() -> None:
     print(f"{'Market':<20}{b.market_brier:>10.4f}{b.market_log_loss:>12.4f}")
     delta = b.elo_brier - a.elo_brier
     verdict = "improved" if delta > 0.0005 else "about the same" if abs(delta) <= 0.0005 else "got worse"
-    print(f"\n(Small sample: {pipeline.full_model.n_rows} rows across {pipeline.loso_df['season'].nunique()} season transitions -- ")
+    print(f"\n(Small sample: {pipeline.full_model.n_rows} rows across {pipeline.loso_df['season'].nunique()} season transitions.")
     print(f" Brier {verdict} by {delta:+.4f}. Take the direction as informative, not conclusive.)")
 
     upcoming_season = pipeline.max_season + 1

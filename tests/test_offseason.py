@@ -120,8 +120,9 @@ def test_qb_value_delta_falls_back_to_presumptive_starter_for_unplayed_season(tm
     def make_pbp(season: int, rows: list[dict]) -> None:
         pd.DataFrame(rows).to_parquet(tmp_path / f"{season}.parquet", index=False)
 
-    # 2021: real season, TEAM started "old". 2022 hasn't been played -- no
-    # schedule row for it at all, only a roster listing two candidate QBs.
+    # 2021: real season, TEAM started "old". 2022 hasn't been played, so
+    # there's no schedule row for it at all, only a roster listing two
+    # candidate QBs.
     make_pbp(
         2021,
         [{"passer_id": "old", "qb_dropback": 1, "qb_epa": -0.1}] * 200
@@ -155,8 +156,8 @@ def test_qb_value_delta_prefers_real_data_over_presumptive_starter(tmp_path, mon
         [{"passer_id": "old", "qb_dropback": 1, "qb_epa": -0.1}] * 200
         + [{"passer_id": "bench_qb", "qb_dropback": 1, "qb_epa": 0.9}] * 200,  # huge volume, but didn't start 2022
     )
-    # 2022 WAS played, and "old" started again (real data) -- even though the
-    # roster also lists a higher-volume "bench_qb", real data must win.
+    # 2022 was played, and "old" started again (real data), even though the
+    # roster also lists a higher-volume "bench_qb". Real data must win.
     schedules = _fake_schedules(
         [
             {"season": 2021, "home_team": "TEAM", "away_team": "OPP", "home_qb_id": "old", "away_qb_id": "zzz"},
@@ -177,10 +178,11 @@ def test_qb_value_delta_prefers_real_data_over_presumptive_starter(tmp_path, mon
 
 
 def test_qb_era_normalization_is_scale_invariant(tmp_path, monkeypatch):
-    """Same relative standing within the season's spread -> same epa_z,
-    even though the two seasons' raw values differ by a straight 2x rescale
-    (standing in for one era's efficiency baseline/spread being wider than
-    another's -- confirmed real, see module docstring)."""
+    """Same relative standing within the season's spread should give the
+    same epa_z, even though the two seasons' raw values differ by a
+    straight 2x rescale (standing in for one era's efficiency baseline
+    being wider than another's, which we confirmed is real; see the module
+    docstring)."""
     monkeypatch.setattr(offseason_features, "PBP_DIR", tmp_path)
 
     def make_season(season: int, values: dict[str, float]) -> None:
@@ -396,7 +398,7 @@ def test_secondary_pfr_crosswalk_fills_gaps_without_overriding_real_data(tmp_pat
         tmp_path,
         [
             {"gsis_id": "p_missing", "pfr_id": "recovered_from_secondary"},
-            # Should be ignored -- rosters already has a real pfr_id for this player.
+            # Should be ignored: rosters already has a real pfr_id for this player.
             {"gsis_id": "p_has_real", "pfr_id": "wrong_should_not_be_used"},
         ],
     )
@@ -426,7 +428,7 @@ def test_defense_value_delta_picks_up_player_only_findable_via_secondary_crosswa
             {"season": 2021, "team": "OTHER3", "player_id": "p_avg3", "pfr_id": "avg3", "position": "CB"},
             {"season": 2021, "team": "OTHER4", "player_id": "p_avg4", "pfr_id": "avg4", "position": "CB"},
             {"season": 2021, "team": "RIVAL", "player_id": "p_star", "pfr_id": None, "position": "DE"},
-            # rosters.parquet's own pfr_id is missing for "p_star" -- only the
+            # rosters.parquet's own pfr_id is missing for "p_star"; only the
             # secondary crosswalk (player_ids.parquet) knows their pfr_id.
             {"season": 2022, "team": "TEAM", "player_id": "p_star", "pfr_id": None, "position": "DE"},
         ]
@@ -440,7 +442,7 @@ def test_defensive_value_zeroed_for_thin_snap_sample(tmp_path, monkeypatch):
     _fake_pfr_def_stats(
         tmp_path,
         [
-            # Huge raw stats, but from a tiny number of snaps -- shouldn't be trusted.
+            # Huge raw stats, but from a tiny number of snaps; shouldn't be trusted.
             {"season": 2021, "pfr_id": "small_sample_stud", "prss": 30, "rat": 90.0, "tgt": 20, "comb": 40},
             {"season": 2021, "pfr_id": "regular", "prss": 5, "rat": 90.0, "tgt": 20, "comb": 40},
         ],
@@ -492,9 +494,9 @@ def test_defensive_value_ignores_rat_below_coverage_qualifier(tmp_path, monkeypa
             {"season": 2021, "pfr_id": "avg1", "prss": 5, "rat": 80.0, "tgt": 20, "comb": 40},
             {"season": 2021, "pfr_id": "avg2", "prss": 5, "rat": 90.0, "tgt": 20, "comb": 40},
             {"season": 2021, "pfr_id": "avg3", "prss": 5, "rat": 100.0, "tgt": 20, "comb": 40},
-            # Qualified (tgt >= MIN_COVERAGE_TARGETS) with a terrible rat -- should be penalized.
+            # Qualified (tgt >= MIN_COVERAGE_TARGETS) with a terrible rat; should be penalized.
             {"season": 2021, "pfr_id": "bad_cover_qualified", "prss": 5, "rat": 158.3, "tgt": 20, "comb": 40},
-            # Same terrible rat, but tiny sample -- shouldn't be penalized for it.
+            # Same terrible rat, but tiny sample, so it shouldn't be penalized for it.
             {"season": 2021, "pfr_id": "bad_cover_small_sample", "prss": 5, "rat": 158.3, "tgt": 1, "comb": 40},
         ],
     )

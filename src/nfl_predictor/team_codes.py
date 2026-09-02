@@ -10,10 +10,10 @@ the same franchise, especially for historical seasons:
   - draft_picks.parquet (PFR-sourced) uses its own style throughout,
     including separate old-city codes for the same three relocations.
 
-Confirmed empirically that the current 2021+ production data only ever uses
-the 32 standard codes -- this table only matters once historical (pre-2021)
-data is in play, but canonicalizing unconditionally is harmless (a no-op)
-either way.
+Checked that the current 2021+ production data only ever uses the 32
+standard codes, so this table only matters once historical (pre-2021) data
+is in play. Canonicalizing unconditionally is harmless either way (a no-op
+when nothing needs remapping).
 """
 
 from __future__ import annotations

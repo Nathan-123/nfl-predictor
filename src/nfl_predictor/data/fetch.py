@@ -1,8 +1,8 @@
 """Thin wrappers around nfl_data_py, one per dataset.
 
 Every fetch function takes a list of seasons and returns a DataFrame, even
-when the underlying nfl_data_py call ignores the years argument (team_desc)
--- this keeps the pipeline's dispatch loop uniform.
+when the underlying nfl_data_py call ignores the years argument (team_desc).
+Keeps the pipeline's dispatch loop uniform.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def fetch_weekly_data(years: list[int]) -> pd.DataFrame:
 def fetch_rosters(years: list[int]) -> pd.DataFrame:
     df = nfl.import_seasonal_rosters(years)
     # jersey_number/draft_number come back as str for some historical seasons
-    # and float for others (confirmed: 2007/2015 str, 2020/2025 float) --
+    # and float for others (2007/2015 str, 2020/2025 float by our check).
     # pyarrow can't write a column that's genuinely mixed-type across rows,
     # so coerce to a single numeric dtype before it ever reaches Parquet.
     for col in ("jersey_number", "draft_number"):
@@ -75,9 +75,9 @@ def fetch_snap_counts(years: list[int]) -> pd.DataFrame:
 
 
 def fetch_player_ids(years: list[int]) -> pd.DataFrame:
-    """A community-maintained (DynastyProcess) cross-site player ID table --
-    not partitioned by season (years is ignored, same as team_desc). Used as
-    a *secondary* pfr_id crosswalk in ratings/offseason_features.py, since
+    """A community-maintained (DynastyProcess) cross-site player ID table.
+    Not partitioned by season (years is ignored, same as team_desc). Used as
+    a secondary pfr_id crosswalk in ratings/offseason_features.py, since
     it's a source independent of rosters.parquet's own pfr_id column and
     fills a meaningful chunk of that column's gaps."""
     return nfl.import_ids()

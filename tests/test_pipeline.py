@@ -3,7 +3,7 @@ and checks each lands as a non-empty, sane-looking DataFrame. Requires
 internet access (hits nfl_data_py's hosted data files).
 
 All fetched output is redirected to a throwaway tmp dir for the duration of
-this module (see isolated_data_dir below) -- these tests must never write
+this module (see isolated_data_dir below); these tests must never write
 into the real data/raw/ cache.
 """
 
@@ -35,17 +35,18 @@ EXPECTED_COLUMNS = {
 }
 
 # nfl_data_py's win_totals source is explicitly flagged upstream as "in flux
-# and may be out of date" -- it can legitimately return 0 rows for recent
+# and may be out of date", so it can legitimately return 0 rows for recent
 # seasons. Everything else is expected to have data for SMOKE_START/END.
 KNOWN_EMPTY_OK = {"win_totals"}
 
 
 @pytest.fixture(scope="module", autouse=True)
 def isolated_data_dir(tmp_path_factory):
-    """Redirect pipeline.DATA_DIR/MANIFEST_PATH to a throwaway tmp dir for
+    """Redirects pipeline.DATA_DIR/MANIFEST_PATH to a throwaway tmp dir for
     this whole module. pipeline.py did `from nfl_predictor.config import
-    DATA_DIR`, so patching config.DATA_DIR alone would not affect the name
-    already bound inside pipeline.py -- patch pipeline's own attributes.
+    DATA_DIR`, so patching config.DATA_DIR alone wouldn't affect the name
+    already bound inside pipeline.py; patch pipeline's own attributes
+    instead.
     """
     tmp_dir = tmp_path_factory.mktemp("data_raw")
     original_data_dir, original_manifest_path = pipeline.DATA_DIR, pipeline.MANIFEST_PATH

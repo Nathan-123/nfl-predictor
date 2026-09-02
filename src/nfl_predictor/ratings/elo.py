@@ -1,9 +1,7 @@
-"""Pure Elo rating math -- no I/O, no pandas. One game at a time.
-
-Follows the well-established FiveThirtyEight NFL Elo methodology: a logistic
-win-probability model, updated after each game by a K-factor scaled by a
-margin-of-victory multiplier that dampens blowouts (an autocorrelated 50-0
-win shouldn't move ratings 5x more than a 10-0 win).
+"""Pure Elo rating math, no I/O or pandas involved. Follows the standard
+FiveThirtyEight-style NFL Elo approach: a logistic win probability model,
+updated after each game with a K-factor scaled by a margin-of-victory
+multiplier so blowouts don't move ratings linearly with the score.
 """
 
 from __future__ import annotations
@@ -15,18 +13,17 @@ DEFAULT_K = 20.0
 
 
 def expected_home_win_prob(elo_home: float, elo_away: float, hfa: float) -> float:
-    """P(home team wins) under the logistic Elo model, given a home-field-
-    advantage bonus (in Elo points) added to the home team's rating."""
+    """Win probability for the home team under the logistic Elo model, given
+    a home-field-advantage bonus (in Elo points)."""
     elo_diff = (elo_home + hfa) - elo_away
     return 1.0 / (1.0 + 10 ** (-elo_diff / 400.0))
 
 
 def mov_multiplier(margin: float, elo_diff: float) -> float:
-    """Margin-of-victory dampener: log-scales the point margin, then divides
-    out most of the boost a big margin gives to an already-big favorite.
-    `elo_diff` is the *pre-game* home-minus-away difference (including HFA)
-    signed from the winner's perspective; `margin` is the winner's margin
-    (always >= 0)."""
+    """Margin-of-victory dampener. Log-scales the point margin, then discounts
+    it based on how big a favorite the winner already was pre-game (elo_diff,
+    signed from the winner's perspective), so a blowout by a heavy favorite
+    doesn't move ratings as much as the same margin from an underdog."""
     return math.log(abs(margin) + 1) * (2.2 / (0.001 * abs(elo_diff) + 2.2))
 
 
@@ -44,9 +41,7 @@ def update_ratings(
 
     margin = home_score - away_score
     elo_diff_signed = (elo_home + hfa) - elo_away
-    # Winner-perspective diff for the MOV formula: how big a favorite was the
-    # actual winner going in (a big win as the underdog swings more than a
-    # big win as the already-heavy favorite).
+    # Flip to the winner's perspective for the MOV formula.
     winner_diff = elo_diff_signed if margin >= 0 else -elo_diff_signed
     shift = k * mov_multiplier(margin, winner_diff) * (actual - expected)
 
@@ -54,17 +49,17 @@ def update_ratings(
 
 
 def regress_to_mean(rating: float, mean: float = DEFAULT_MEAN, regress_frac: float = 0.4) -> float:
-    """Season-carryover mean reversion: pull `rating` a fraction of the way
-    back toward the league mean. Default 0.4 (not the more textbook 1/3):
-    a sweep of regress_frac against the real 2021+ backtest found 0.4-0.5
-    modestly outperforming 1/3 (0.2247/0.2245 vs 0.2249 Brier), a shallow
-    but consistent improvement -- picked 0.4 rather than the single best
-    point (0.5) to avoid over-fitting one sweep on a small sample."""
+    """Pulls `rating` a fraction of the way back toward the league mean
+    between seasons. Default is 0.4 rather than the textbook 1/3; a sweep
+    against the 2021+ backtest showed 0.4-0.5 edging out 1/3 (0.2247/0.2245
+    vs 0.2249 Brier). Went with 0.4 rather than the best single point (0.5)
+    since that gap is small enough to be one sweep's noise, not a real
+    optimum."""
     return rating - regress_frac * (rating - mean)
 
 
 def hfa_from_home_win_rate(home_win_rate: float) -> float:
-    """Back out an Elo home-field-advantage constant (in points) that would
-    reproduce the observed home win rate for two otherwise-equal teams."""
-    home_win_rate = min(max(home_win_rate, 1e-6), 1 - 1e-6)  # keep logit finite
+    """Back out the Elo home-field-advantage constant that reproduces a
+    given home win rate between two otherwise equal teams."""
+    home_win_rate = min(max(home_win_rate, 1e-6), 1 - 1e-6)  # keep the logit finite
     return 400 * math.log10(home_win_rate / (1 - home_win_rate))

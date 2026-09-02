@@ -30,8 +30,8 @@ FEATURE_COLS = [
 
 
 def _team_game_epa(seasons: list[int]) -> pd.DataFrame:
-    """game_id, season, week, team, off_epa, def_epa -- one row per team per
-    game (so each game_id appears twice, once per side)."""
+    """game_id, season, week, team, off_epa, def_epa. One row per team per
+    game, so each game_id appears twice, once per side."""
     frames = []
     for season in seasons:
         path = PBP_DIR / f"{season}.parquet"
@@ -51,11 +51,11 @@ def _team_game_epa(seasons: list[int]) -> pd.DataFrame:
 
 
 def build_rolling_epa(seasons: list[int], window: int = ROLLING_WINDOW) -> pd.DataFrame:
-    """game_id, team, off_epa_roll, def_epa_roll -- each team's trailing
-    mean EPA over their last `window` games, SHIFTED so a game's own plays
-    (and any later game's) never leak into its own feature. Chronological
-    order runs across season boundaries (no reset at Week 1) -- "recent
-    form" carrying a few games into a new season is intentional, not a bug.
+    """game_id, team, off_epa_roll, def_epa_roll: each team's trailing mean
+    EPA over their last `window` games, shifted so a game's own plays (and
+    any later game's) never leak into its own feature. Chronological order
+    runs across season boundaries with no reset at Week 1; "recent form"
+    carrying a few games into a new season is intentional, not a bug.
     """
     team_games = _team_game_epa(seasons).sort_values(["team", "season", "week"])
     grouped = team_games.groupby("team")[["off_epa", "def_epa"]]
@@ -65,7 +65,7 @@ def build_rolling_epa(seasons: list[int], window: int = ROLLING_WINDOW) -> pd.Da
 
 
 def _week1_ordered_team_games(schedules: pd.DataFrame) -> pd.DataFrame:
-    """game_id, season, week, team, qb_id -- long format, chronologically
+    """game_id, season, week, team, qb_id. Long format, chronologically
     orderable, one row per team per game."""
     home = schedules[["game_id", "season", "week", "home_team", "home_qb_id"]].rename(
         columns={"home_team": "team", "home_qb_id": "qb_id"}
@@ -79,7 +79,7 @@ def _week1_ordered_team_games(schedules: pd.DataFrame) -> pd.DataFrame:
 def build_qb_continuity_flags(schedules: pd.DataFrame) -> pd.DataFrame:
     """game_id, team, qb_changed (1.0 if this game's starter differs from
     that team's immediately preceding game's starter, 0.0 if same, NaN for
-    a team's first game in the dataset). In-season signal -- distinct from
+    a team's first game in the dataset). An in-season signal, distinct from
     Stage 1b's offseason QB value delta."""
     long = _week1_ordered_team_games(schedules).sort_values(["team", "season", "week"])
     prev_qb = long.groupby("team")["qb_id"].shift(1)

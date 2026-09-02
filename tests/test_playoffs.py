@@ -1,4 +1,4 @@
-"""Tests for Stage 4: playoff bracket simulation -- bracket advancement,
+"""Tests for Stage 4: playoff bracket simulation. Covers bracket advancement,
 divisional re-seeding, no-tie resampling, and neutral-site handling, all on
 synthetic data, plus an integration check (folded into
 test_season_simulation.py's internal-consistency test)."""
@@ -83,8 +83,8 @@ def test_divisional_round_reseeds_by_worst_remaining_seed(monkeypatch):
         frozenset(["S2", "S7"]): "S7",
         frozenset(["S3", "S6"]): "S6",
         frozenset(["S4", "S5"]): "S5",
-        # Correct re-seed: #1 plays the worst survivor (S7); S5 (better remaining
-        # seed than S6) hosts -- NOT the original bracket slots.
+        # Correct re-seed: #1 plays the worst survivor (S7); S5 (better
+        # remaining seed than S6) hosts, not the original bracket slots.
         frozenset(["S1", "S7"]): "S1",
         frozenset(["S5", "S6"]): "S6",
         frozenset(["S1", "S6"]): "S1",

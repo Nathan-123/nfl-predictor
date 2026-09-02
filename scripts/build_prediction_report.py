@@ -2,17 +2,17 @@
 """Builds one combined, human-readable prediction report from run_season_
 simulation.py's representative-simulation outputs: the real result of every
 regular-season game (week by week, with real upsets), the real playoff
-bracket, and the real final regular-season record -- all in one CSV, all
-from the SAME one randomly-drawn realistic season, so every section is
-mutually consistent (unlike picking each game's aggregate favorite
+bracket, and the real final regular-season record, all in one CSV, all from
+the same one randomly-drawn realistic season. That keeps every section
+mutually consistent, unlike picking each game's aggregate favorite
 independently, which both looks unrealistic and can disagree with itself
-from one section to the next).
+from one section to the next.
 
-Doesn't run any new simulation -- purely reformats
+Doesn't run any new simulation, just reformats
 data/processed/representative_season_games.csv, projected_playoff_bracket.csv,
-and projected_final_record.csv (run scripts/run_season_simulation.py first
+and projected_final_record.csv. Run scripts/run_season_simulation.py first
 if those don't exist yet, or are stale relative to the data you want
-reflected).
+reflected.
 
 Example:
     python scripts/build_prediction_report.py
@@ -53,7 +53,7 @@ def main() -> None:
     ]
     if missing:
         raise SystemExit(
-            f"Missing {[p.name for p in missing]} -- run scripts/run_season_simulation.py first."
+            f"Missing {[p.name for p in missing]}. Run scripts/run_season_simulation.py first."
         )
 
     games = pd.read_csv(REPRESENTATIVE_GAMES_PATH)
@@ -72,22 +72,22 @@ def main() -> None:
             writer,
             "Weekly Game Results",
             f"One real, randomly-drawn realistic season ({n_upsets} of {len(weekly)} games were upsets vs. the "
-            "model's pregame favorite) -- not a guarantee this exact season happens; see "
+            "model's pregame favorite). Not a guarantee this exact season happens; see "
             "season_simulation_summary.csv for the full probability distribution across every simulation.",
             weekly,
         )
         _write_section(
             writer,
             "Playoff Bracket Results",
-            "The same representative season's real playoff bracket -- home_team is always the better seed except "
-            "the Super Bowl (no seed to judge an upset against, left blank).",
+            "The same representative season's real playoff bracket. home_team is always the better seed except "
+            "the Super Bowl (no seed to judge an upset against, so that column is left blank there).",
             playoff,
         )
         _write_section(
             writer,
             "Final Regular-Season Record",
-            "The same representative season's real final standings -- consistent by construction with the weekly "
-            "results above (literally the same simulated season, not re-derived).",
+            "The same representative season's real final standings, consistent by construction with the weekly "
+            "results above since it's literally the same simulated season, not re-derived.",
             final_record,
         )
 

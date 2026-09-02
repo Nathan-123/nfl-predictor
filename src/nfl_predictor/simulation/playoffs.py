@@ -1,7 +1,8 @@
 """Single-elimination playoff bracket simulation, layered on top of Stage 3's
-regular-season machinery: same margin-sampling model, same elo.update_ratings,
-same RNG -- run inside the same per-simulation loop so each simulated
-postseason starts from that exact simulation's own final ratings and seeding.
+regular-season machinery: same margin-sampling model, same
+elo.update_ratings, same RNG. Runs inside the same per-simulation loop so
+each simulated postseason starts from that exact simulation's own final
+ratings and seeding.
 """
 
 from __future__ import annotations
@@ -26,16 +27,16 @@ def _play_single_elim_game(
     rng: np.random.Generator,
     neutral: bool = False,
 ) -> str:
-    """One elimination game -- no ties (NFL playoffs go to sudden-death
-    overtime until decided), so a margin that rounds to exactly 0 is
-    resampled. Updates `ratings` in place via the same Elo update used
+    """One elimination game. No ties allowed (NFL playoffs go to sudden-
+    death overtime until decided), so a margin that rounds to exactly 0
+    gets resampled. Updates `ratings` in place via the same Elo update used
     everywhere else, and returns the winning team code.
 
     `neutral` (Super Bowl only): both the fitted margin model's intercept
-    and Elo's hfa were fit on real games that virtually all had an actual
-    home team, so both encode a real home-field scoring edge -- for a
-    neutral-site game, drop both rather than incorrectly favoring whichever
-    team is passed as `home`.
+    and Elo's hfa were fit on real games that almost all had an actual home
+    team, so both encode a real home-field scoring edge. For a neutral-site
+    game, drop both rather than incorrectly favoring whichever team happens
+    to be passed as `home`.
     """
     effective_hfa = 0.0 if neutral else hfa
     effective_intercept = 0.0 if neutral else margin_intercept
@@ -108,8 +109,8 @@ def simulate_playoffs(
     margin_std: float,
     rng: np.random.Generator,
 ) -> PlayoffResult:
-    """seeds_by_conference: conference name -> 7 seeds (best to worst), e.g.
-    from standings.seed_conference. `ratings` should be that same
+    """seeds_by_conference: conference name -> 7 seeds, best to worst (e.g.
+    from standings.seed_conference). `ratings` should be that same
     simulation's final regular-season ratings, not the season-starting ones."""
     divisional_teams: set[str] = set()
     conference_championship_teams: set[str] = set()
@@ -156,10 +157,10 @@ class BracketGame:
     winner: str
 
 
-# ---- detailed replay: real random draws, but with the game-by-game bracket -
-# recorded (simulate_playoffs' hot-path version above only returns team
-# SETS reaching each round, which is enough for the aggregate Monte Carlo
-# counts but not enough to print an actual bracket for one chosen sim).
+# ---- detailed replay: real random draws, but with the game-by-game bracket
+# recorded. simulate_playoffs' hot-path version above only returns team sets
+# reaching each round, which is enough for the aggregate Monte Carlo counts
+# but not enough to print an actual bracket for one chosen sim.
 
 
 def _simulate_conference_detailed(
@@ -175,8 +176,8 @@ def _simulate_conference_detailed(
     games: list[BracketGame],
 ) -> str:
     """Same bracket structure and real random margin draws as
-    _simulate_conference, but also appends a BracketGame record for every
-    game played. See simulate_playoffs_detailed."""
+    _simulate_conference, but appends a BracketGame record for every game
+    played too. See simulate_playoffs_detailed."""
     seed_rank = {team: i + 1 for i, team in enumerate(seeds)}
     args = (ratings, hfa, k, margin_intercept, margin_slope, margin_std, rng)
 
@@ -219,11 +220,11 @@ def simulate_playoffs_detailed(
     margin_std: float,
     rng: np.random.Generator,
 ) -> tuple[list[BracketGame], str]:
-    """The real-randomness counterpart to simulate_playoffs_deterministic:
-    same stochastic margin draws as simulate_playoffs (reuses the same
+    """The real-randomness counterpart to simulate_playoffs_deterministic.
+    Same stochastic margin draws as simulate_playoffs (reuses the same
     tested _play_single_elim_game), but returns the actual game-by-game
-    bracket instead of just team sets -- for building a human-readable
-    table out of ONE chosen, already-realistic simulation."""
+    bracket instead of just team sets, for building a human-readable table
+    out of one chosen, already-realistic simulation."""
     games: list[BracketGame] = []
     conference_champions = []
     for conference, seeds in seeds_by_conference.items():
@@ -259,7 +260,7 @@ def simulate_playoffs_detailed(
     return games, champion
 
 
-# ---- deterministic ("model's best single guess") bracket, no RNG ------------
+# ---- deterministic ("model's best single guess") bracket, no RNG ---------
 
 
 def _play_single_elim_game_deterministic(
@@ -274,7 +275,7 @@ def _play_single_elim_game_deterministic(
 ) -> tuple[str, int]:
     """Same no-RNG "model's point estimate wins" rule as
     season.simulate_one_season_deterministic (see that docstring for the
-    margin==0 tie-break); returns (winner, home_score - away_score) for
+    margin==0 tie-break). Returns (winner, home_score - away_score) for
     display."""
     effective_hfa = 0.0 if neutral else hfa
     effective_intercept = 0.0 if neutral else margin_intercept
@@ -342,10 +343,10 @@ def simulate_playoffs_deterministic(
     margin_intercept: float,
     margin_slope: float,
 ) -> tuple[list[BracketGame], str]:
-    """The no-RNG counterpart to simulate_playoffs: seeds_by_conference and
+    """The no-RNG counterpart to simulate_playoffs. seeds_by_conference and
     `ratings` should come from season.simulate_one_season_deterministic's
-    own output, not a Monte Carlo sim's. Returns (every game played
-    including the Super Bowl, champion)."""
+    own output, not a Monte Carlo sim's. Returns every game played
+    (including the Super Bowl) and the champion."""
     games: list[BracketGame] = []
     conference_champions = []
     for conference, seeds in seeds_by_conference.items():

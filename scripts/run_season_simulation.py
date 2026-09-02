@@ -106,15 +106,15 @@ def main() -> None:
         display[col] = (display[col] * 100).round(1)
     print(display.to_string(index=False))
 
-    # ---- per-game / per-slot win probabilities, aggregated across all sims -
-    # The actual "best possible prediction for every game" output: for each
+    # ---- per-game / per-slot win probabilities, aggregated across all sims
+    # The "best possible prediction for every game" output: for each
     # scheduled regular-season game, what fraction of the n_sims runs above
-    # had the home team winning THAT SPECIFIC matchup (properly accounting
+    # had the home team winning that specific matchup, properly accounting
     # for the fact that by, say, Week 10, each sim's teams carry whatever
-    # rating drift that sim's own earlier random results produced). Playoff
-    # games are aggregated by structural bracket slot instead of team name,
-    # since who's even IN a given playoff game depends on the regular season
-    # -- see run_simulations' docstring.
+    # rating drift that sim's own earlier random results produced. Playoff
+    # games get aggregated by structural bracket slot instead of team name,
+    # since who's even in a given playoff game depends on the regular
+    # season; see run_simulations' docstring.
     game_probs_display = results.game_probabilities.copy()
     game_probs_display["home_win_prob"] = (game_probs_display["home_win_prob"] * 100).round(1)
     game_probs_display["avg_margin"] = game_probs_display["avg_margin"].round(1)
@@ -135,24 +135,24 @@ def main() -> None:
     print(f"Saved: {PLAYOFF_SLOT_PROBABILITIES_PATH}")
 
     # ---- one realistic representative simulation: record + bracket --------
-    # A complement to the Monte Carlo summary above, but built from a REAL
-    # simulated season (real random variance -- favorites do sometimes lose)
-    # rather than a no-randomness "favorite always wins" run, which produces
-    # unrealistic blowout records (16-1, 1-16) that don't match the summary's
-    # own mean_wins. Picked from the n_sims already run above: the single
-    # simulation whose per-team win total is closest (least squared error)
-    # to the aggregate summary's median_wins -- i.e. the most "typical" of
-    # the realistic seasons already drawn, not a fabricated extreme.
+    # A complement to the Monte Carlo summary above, but built from a real
+    # simulated season (real random variance, so favorites do sometimes
+    # lose) rather than a no-randomness "favorite always wins" run, which
+    # produces unrealistic blowout records (16-1, 1-16) that don't match the
+    # summary's own mean_wins. Picked from the n_sims already run above: the
+    # single simulation whose per-team win total is closest (least squared
+    # error) to the aggregate summary's median_wins, i.e. the most "typical"
+    # of the realistic seasons already drawn, not a fabricated extreme.
     target_wins = results.summary.set_index("team")["median_wins"]
     win_pivot = results.win_totals.pivot(index="sim", columns="team", values="wins")
     squared_error = ((win_pivot - target_wins) ** 2).sum(axis=1)
     representative_sim = int(squared_error.idxmin())
     rep_standings, rep_seeds_by_conference, rep_ratings, rep_game_log = results.regular_season_details[representative_sim]
 
-    # This sim's own real game-by-game results -- includes real upsets,
+    # This sim's own real game-by-game results, including real upsets,
     # unlike game_win_probabilities.csv's aggregate "who's favored" view.
     # Joined against that same aggregate table so an "upset" (the model's
-    # favorite actually lost, in this specific realistic draw) is flagged
+    # favorite actually lost, in this specific realistic draw) gets flagged
     # explicitly rather than left for the reader to spot by eye.
     rep_games_df = pd.DataFrame(rep_game_log, columns=["week", "game_id", "home_team", "away_team", "winner", "margin"])
     rep_games_df = rep_games_df.merge(
@@ -196,15 +196,15 @@ def main() -> None:
 
     print(
         f"\n{upcoming_season} projected final record "
-        f"(one representative simulation -- #{representative_sim} of {args.n_sims}, "
+        f"(one representative simulation, #{representative_sim} of {args.n_sims}, "
         "closest to the summary's median win totals):\n"
     )
     print(record_df.to_string(index=False))
 
-    # A fresh random draw for the playoffs, seeded from that same simulation's
-    # real final standings/ratings -- not a literal replay of sim #N's own
-    # postseason (which wasn't retained to save memory), but the same
-    # stochastic model applied to the same realistic regular season.
+    # A fresh random draw for the playoffs, seeded from that same
+    # simulation's real final standings/ratings. Not a literal replay of
+    # sim #N's own postseason (which wasn't retained, to save memory), but
+    # the same stochastic model applied to the same realistic regular season.
     rng_playoff = np.random.default_rng(None if args.seed is None else args.seed + 1)
     bracket_games, champion = simulate_playoffs_detailed(
         seeds_by_conference=rep_seeds_by_conference,

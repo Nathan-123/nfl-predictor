@@ -28,10 +28,11 @@ def test_margin_to_scores(margin, expected):
 
 def test_simulate_one_season_tie_rate_is_realistic_not_naive_rounding():
     # An even matchup (predicted_margin=0) is the worst case for spurious
-    # ties -- naively rounding the continuous margin draw puts ~2.9% of its
-    # mass at exactly 0 (confirmed empirically), ~10x the real NFL rate
-    # (~0.28% of 2021+ games). The redraw-once fix in simulate_one_season
-    # should land close to that real rate, not the naive one.
+    # ties: naively rounding the continuous margin draw puts about 2.9% of
+    # its mass at exactly 0 by our own check, roughly 10x the real NFL rate
+    # (about 0.28% of 2021+ games). The redraw-once fix in
+    # simulate_one_season should land close to that real rate, not the
+    # naive one.
     #
     # One single game per trial (not a repeated A-vs-B schedule): ratings
     # update after every game, so a persistent single matchup runs away from
@@ -133,7 +134,7 @@ def test_simulate_one_season_deterministic_always_picks_the_favorite():
 
 
 def test_simulate_one_season_deterministic_is_reproducible():
-    # No RNG at all -- two runs of identical inputs must match exactly.
+    # No RNG at all, so two runs of identical inputs must match exactly.
     schedule = pd.DataFrame(
         [{"home_team": "A", "away_team": "B", "week": 1, "game_id": "g1"}]
     )
@@ -190,9 +191,9 @@ def test_deterministic_bracket_produces_a_super_bowl_between_two_conferences():
 def _toy_league_of_14():
     # run_simulations always runs a real playoff bracket, which needs exactly
     # 7 seeded teams per conference: seed_conference takes the top team from
-    # EACH division as a division winner, then the best 3 non-winners as
-    # wildcards -- so 4 divisions per conference (sized 2,2,2,1) sum to
-    # 4 winners + 3 wildcards = 7, matching the real NFL's structure.
+    # each division as a division winner, then the best 3 non-winners as
+    # wildcards. 4 divisions per conference (sized 2,2,2,1) sum to 4 winners
+    # plus 3 wildcards = 7, matching the real NFL's structure.
     teams = [f"T{i}" for i in range(1, 15)]
     div_sizes = [2, 2, 2, 1]
     divisions = {}
@@ -259,7 +260,7 @@ def test_run_simulations_keeps_regular_season_details_when_requested():
     assert len(seeds_by_conference["CONF_A"]) == 7
     assert set(final_ratings) == set(starting_ratings)
     # A win vector recomputed from the stored standings must match win_totals'
-    # own row for the same sim -- the two shouldn't be able to silently drift.
+    # own row for the same sim; the two shouldn't be able to silently drift.
     row = results.win_totals[(results.win_totals["sim"] == 0) & (results.win_totals["team"] == "T1")].iloc[0]
     assert rec_standings["T1"].wins + 0.5 * rec_standings["T1"].ties == row["wins"]
     # The stored game_log must be internally consistent with the standings it

@@ -1,4 +1,4 @@
-# Data regeneratable via the pipeline -- ignore the cache dirs specifically
+# Data regeneratable via the pipeline. Ignore the cache dirs specifically
 # (not /data/ wholesale) so /data/manual/ (small, hand-curated, worth
 # committing) stays tracked.
 /data/raw/

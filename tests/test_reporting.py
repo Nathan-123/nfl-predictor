@@ -1,7 +1,7 @@
 """Tests for the combined prediction-report derivation (scripts/
-build_prediction_report.py's logic, in simulation/reporting.py) -- all on
-synthetic data shaped like representative_season_games.csv /
-projected_playoff_bracket.csv / projected_final_record.csv."""
+build_prediction_report.py's logic, in simulation/reporting.py). All on
+synthetic data shaped like representative_season_games.csv,
+projected_playoff_bracket.csv, and projected_final_record.csv."""
 
 import sys
 from pathlib import Path
@@ -31,7 +31,7 @@ def test_weekly_results_reports_winners_own_pregame_probability_home_won():
 
 
 def test_weekly_results_flips_probability_when_the_away_team_actually_won():
-    # A was favored (70%) but B actually won this specific representative season -- an upset.
+    # A was favored (70%) but B actually won this specific representative season: an upset.
     games = _fake_games(
         [{"week": 1, "home_team": "A", "away_team": "B", "home_win_prob": 0.7, "predicted_winner": "A", "winner": "B", "upset": True}]
     )
@@ -73,7 +73,7 @@ def test_playoff_results_flags_an_upset_when_the_worse_seed_wins():
         [{"round": "Wild Card", "conference": "AFC", "home_team": "A", "away_team": "B", "home_seed": 2.0, "away_seed": 7.0, "winner": "B"}]
     )
     playoff = reporting.build_playoff_results(bracket)
-    assert playoff.loc[0, "upset"] == True  # noqa: E712 -- comparing an actual bool, not identity
+    assert playoff.loc[0, "upset"] == True  # noqa: E712 (comparing an actual bool, not identity)
 
 
 def test_playoff_results_no_upset_when_better_seed_wins():

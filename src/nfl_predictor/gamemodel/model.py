@@ -1,7 +1,7 @@
 """XGBoost game outcome model: a classifier for home win probability and a
 regressor for point margin, both trained on the Stage 2 feature table and
-backtested with an expanding walk-forward-by-season split (never trains on
-a season it's then evaluated on) -- same spirit as Stage 1b's LOSO CV.
+backtested with an expanding walk-forward-by-season split (it never trains
+on a season it's then evaluated on), same spirit as Stage 1b's LOSO CV.
 """
 
 from __future__ import annotations
@@ -15,12 +15,11 @@ from xgboost import XGBClassifier, XGBRegressor
 from nfl_predictor.gamemodel.features import FEATURE_COLS
 from nfl_predictor.metrics import brier_score, log_loss, mae
 
-# Deliberately shallow/regularized: with ~600-950 training rows per walk-
-# forward fold and 14 features, the default XGBoost depth/estimator count
-# overfits badly (tried it -- Brier got meaningfully *worse* than plain Elo).
-# These were picked by comparing average walk-forward Brier across a few
-# regularization levels; not exhaustively tuned, just enough to stop the
-# model from fitting noise on this little data.
+# Deliberately shallow and regularized: with roughly 600-950 training rows
+# per walk-forward fold and 14 features, XGBoost's defaults overfit badly
+# (tried it, Brier came out worse than plain Elo). Picked by comparing
+# average walk-forward Brier across a few regularization levels, not
+# exhaustively tuned, just enough to stop the model fitting noise.
 CLASSIFIER_PARAMS = dict(
     n_estimators=60, max_depth=2, learning_rate=0.03, subsample=0.8, colsample_bytree=0.8, reg_lambda=5,
     eval_metric="logloss",
@@ -48,9 +47,9 @@ class BacktestReport:
 
 
 def _fit_elo_margin_baseline(train: pd.DataFrame) -> tuple[float, float]:
-    """OLS home_margin ~ elo_diff on the training fold -- a simple,
-    consistently-refit baseline for "what would plain Elo predict the
-    margin to be", to compare the GBM's margin predictions against."""
+    """OLS home_margin ~ elo_diff on the training fold. A simple, refit-
+    every-fold baseline for "what would plain Elo predict the margin to be",
+    to compare the GBM's margin predictions against."""
     x = train["elo_diff"].to_numpy(dtype=float)
     y = train["home_margin"].to_numpy(dtype=float)
     A = np.vstack([np.ones_like(x), x]).T
@@ -74,10 +73,11 @@ def walk_forward_backtest(features: pd.DataFrame) -> pd.DataFrame:
         if train.empty or test.empty:
             continue
 
-        # XGBClassifier needs discrete class labels -- the ~4 historical ties
-        # (actual_home_win == 0.5) get excluded from *training* only; they're
-        # still predicted on and still scored (brier/log_loss handle a 0.5
-        # target fine) so they aren't silently dropped from the backtest.
+        # XGBClassifier needs discrete class labels, so the handful of
+        # historical ties (actual_home_win == 0.5) get excluded from
+        # training only. They're still predicted on and still scored
+        # (brier/log_loss handle a 0.5 target fine), so they aren't
+        # silently dropped from the backtest.
         train_clf = train[train["actual_home_win"] != 0.5]
         clf = XGBClassifier(**CLASSIFIER_PARAMS)
         clf.fit(train_clf[FEATURE_COLS], train_clf["actual_home_win"])
@@ -115,8 +115,8 @@ def summarize_backtest(predictions: pd.DataFrame) -> BacktestReport:
         baseline_log_loss=log_loss(baseline, actual_win),
         gbm_margin_mae=mae(predictions["gbm_margin"].to_numpy(), actual_margin),
         elo_margin_mae=mae(predictions["elo_margin_baseline"].to_numpy(), actual_margin),
-        # nflverse's spread_line convention: positive means the home team is
-        # favored -- it's already the market's implied home margin directly.
+        # nflverse's spread_line convention has positive meaning the home
+        # team is favored, so it's already the market's implied home margin.
         market_margin_mae=mae(predictions["spread_line"].to_numpy(dtype=float), actual_margin),
     )
 

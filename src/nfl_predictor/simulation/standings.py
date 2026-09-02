@@ -1,17 +1,16 @@
 """Standings bookkeeping and playoff seeding for one simulated season.
 
-Tiebreak simplification (documented, not hidden): the real NFL tiebreaker
-procedure is a long sequential list (head-to-head, division record,
-conference record, common games, strength of victory, strength of schedule,
-net points/touchdowns in various scopes, then a coin toss) applied
-iteratively to whatever subset of teams remains tied at each step. This
-implementation instead builds one composite sort key per team --
-(win_pct, head-to-head-among-the-tied-group pct, division pct, conference
-pct, point differential, team code) -- and sorts by it directly. That's a
-single-pass approximation of the real sequential process; it agrees with
-the official procedure in the vast majority of cases but can diverge in
-edge cases. Good enough to seed a Monte Carlo simulation, not a substitute
-for the actual rulebook.
+A note on the tiebreak logic: the real NFL tiebreaker procedure is a long
+sequential list (head-to-head, division record, conference record, common
+games, strength of victory, strength of schedule, net points/touchdowns in
+various scopes, then a coin toss), applied iteratively to whatever subset of
+teams remains tied at each step. This implementation simplifies that into
+one composite sort key per team (win_pct, head-to-head-among-the-tied-group
+pct, division pct, conference pct, point differential, team code) and sorts
+by it directly. It's a single-pass approximation of the real sequential
+process: it matches the official procedure in the large majority of cases
+but can diverge in edge cases. Good enough to seed a Monte Carlo simulation,
+not a substitute for the actual rulebook.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
-"""Monte Carlo season simulation, driven by the Elo+adjustment engine (see
-the plan doc for why not the Stage 2 GBM: a season sim is recursive --
-each simulated outcome feeds the next game's pregame ratings -- which is
-exactly what Elo is built for, while the GBM's best features (rolling EPA,
-in-season QB continuity) only exist for real, already-played games.
+"""Monte Carlo season simulation, driven by the Elo+adjustment engine rather
+than the Stage 2 GBM: a season sim is recursive (each simulated outcome
+feeds the next game's pregame ratings), which is exactly what Elo is built
+for, while the GBM's best features (rolling EPA, in-season QB continuity)
+only exist for real, already-played games.
 """
 
 from __future__ import annotations
@@ -18,15 +18,16 @@ from nfl_predictor.ratings.elo import regress_to_mean, update_ratings
 from nfl_predictor.simulation.standings import new_standings, record_game, seed_conference
 from nfl_predictor.team_codes import canonicalize_teams
 
-# Imported lazily inside run_simulations to avoid a circular import
-# (playoffs.py imports margin_to_scores from this module).
+# playoffs.py is imported lazily inside run_simulations to avoid a circular
+# import (it imports margin_to_scores from this module).
 
 
 def fit_margin_model(elo_game_log: pd.DataFrame) -> tuple[float, float, float]:
     """OLS home_margin ~ intercept + slope * elo_diff on real history, plus
-    the residual std -- the same approach as gamemodel.model's Elo-margin
-    baseline, refit here on the full dataset (not per walk-forward fold)
-    since this drives random scoreline sampling, not a backtest."""
+    the residual std. Same approach as gamemodel.model's Elo-margin
+    baseline, refit here on the full dataset rather than per walk-forward
+    fold, since this drives random scoreline sampling rather than a
+    backtest."""
     elo_diff = (elo_game_log["pregame_elo_home"] - elo_game_log["pregame_elo_away"]).to_numpy(dtype=float)
     margin = (elo_game_log["home_score"] - elo_game_log["away_score"]).to_numpy(dtype=float)
     A = np.vstack([np.ones_like(elo_diff), elo_diff]).T
@@ -38,9 +39,9 @@ def fit_margin_model(elo_game_log: pd.DataFrame) -> tuple[float, float, float]:
 def project_starting_ratings(
     current_ratings: pd.DataFrame, adjustments: dict[str, float], regress_frac: float = 1 / 3
 ) -> dict[str, float]:
-    """Apply the same season-boundary treatment ratings.pipeline.run() uses
-    internally (mean-reversion + fitted offseason adjustment) to get each
-    team's rating at the start of the upcoming season."""
+    """Applies the same season-boundary treatment ratings.pipeline.run()
+    uses internally (mean reversion plus the fitted offseason adjustment) to
+    get each team's rating at the start of the upcoming season."""
     return {
         row.team: regress_to_mean(row.elo_rating) + adjustments.get(row.team, 0.0)
         for row in current_ratings.itertuples(index=False)
@@ -49,9 +50,9 @@ def project_starting_ratings(
 
 def load_team_division_conference() -> tuple[dict[str, str], dict[str, str]]:
     """team -> division, team -> conference, restricted to the 32 current
-    team codes (schedules.parquet spans back to 2007 and, before
-    canonicalizing, carries old codes for relocated franchises, e.g.
-    OAK/SD/STL; team_desc.parquet carries those same old codes too)."""
+    team codes. schedules.parquet spans back to 2007 and, before
+    canonicalizing, carries old codes for relocated franchises (OAK/SD/STL);
+    team_desc.parquet carries those same old codes too."""
     schedules = pd.read_parquet(DATA_DIR / "schedules.parquet")
     schedules = canonicalize_teams(schedules, ["home_team", "away_team"])
     current_teams = set(schedules["home_team"].unique()) | set(schedules["away_team"].unique())
@@ -69,10 +70,10 @@ def load_season_schedule(season: int) -> pd.DataFrame:
 
 
 def margin_to_scores(margin: int) -> tuple[int, int]:
-    """Convert a signed point margin into a synthetic (home_score,
-    away_score) pair -- elo.update_ratings only cares about the sign
-    (who won) and magnitude (for the MOV multiplier), not the actual score
-    level, so this is the simplest pair with the right difference."""
+    """Converts a signed point margin into a synthetic (home_score,
+    away_score) pair. elo.update_ratings only cares about the sign (who won)
+    and magnitude (for the MOV multiplier), not the actual score level, so
+    this is just the simplest pair with the right difference."""
     return max(margin, 0), max(-margin, 0)
 
 
@@ -90,20 +91,18 @@ def simulate_one_season(
     game_tally: dict[str, list[float]] | None = None,
     game_log: list[tuple] | None = None,
 ):
-    """game_tally: optional accumulator (mutated in place, NOT reset here) --
-    caller passes a shared dict across many calls to build up per-game
-    win/margin statistics without retaining every individual game result.
-    Keyed by game_id -> [home_win_credit_sum, margin_sum, n_sims] (a tie
-    contributes 0.5 credit, matching how standings.py scores a tie in the
-    win column).
+    """game_tally: optional accumulator (mutated in place, not reset here).
+    Pass a dict shared across many calls to build up per-game win/margin
+    statistics without retaining every individual game result. Keyed by
+    game_id -> [home_win_credit_sum, margin_sum, n_sims] (a tie contributes
+    0.5 credit, matching how standings.py scores a tie).
 
-    game_log: optional list (mutated in place) that instead records THIS
+    game_log: optional list (mutated in place) that instead records this
     call's own individual game results, one (week, game_id, home_team,
-    away_team, winner, margin) tuple per game -- winner is "TIE" for a tie,
-    never None. Unlike game_tally this isn't meant to be shared/accumulated
-    across many calls -- pass a fresh list per call (e.g. to recover one
-    specific simulated season's real, upset-inclusive results after the
-    fact -- see run_simulations' regular_season_details)."""
+    away_team, winner, margin) tuple per game (winner is "TIE" for a tie,
+    never None). Not meant to be shared across calls like game_tally is;
+    pass a fresh list each time to recover one specific simulated season's
+    results afterward (see run_simulations' regular_season_details)."""
     ratings = dict(starting_ratings)
     standings = new_standings(list(ratings.keys()))
 
@@ -112,15 +111,13 @@ def simulate_one_season(
         predicted_margin = margin_intercept + margin_slope * (ratings[home] - ratings[away])
         margin = int(round(rng.normal(predicted_margin, margin_std)))
         if margin == 0:
-            # Real NFL games essentially never end in a genuine tie (~0.28%
-            # of 2021+ games, confirmed against the real game log) -- but
-            # naively rounding a continuous normal draw puts ~3% of its mass
-            # at exactly 0 for an even matchup, ~10x too often, because the
-            # model has no separate notion of "went to overtime" the way a
-            # real tied game does. Approximate that extra step cheaply: redraw
-            # once (the overtime period, another draw from the same margin
-            # model) and only accept a tie if THAT also lands on 0 -- lands
-            # close to the real rate without a separate overtime model.
+            # Real NFL games almost never end in a genuine tie (about 0.28%
+            # of 2021+ games by our own count), but naively rounding a
+            # continuous normal draw puts about 3% of its mass at exactly 0
+            # for an even matchup, roughly 10x too often, since the model
+            # has no separate notion of "went to overtime." Cheap fix:
+            # redraw once, as if that were the overtime period, and only
+            # call it a tie if that also lands on 0.
             margin = int(round(rng.normal(predicted_margin, margin_std)))
         home_score, away_score = margin_to_scores(margin)
 
@@ -152,15 +149,14 @@ def simulate_one_season_deterministic(
     conferences: dict[str, str],
 ):
     """One single, non-random pass through the schedule: each game's winner
-    is whichever team the fitted margin model favors (no draw from the
-    residual distribution), so this answers "what does the model expect to
-    happen" rather than run_simulations' "how likely is each outcome" --
-    a complementary, single coherent win-loss record and (fed into
-    simulate_playoffs_deterministic) a single coherent bracket, not an
-    aggregate over many random draws.
+    is whichever team the fitted margin model favors, with no draw from the
+    residual distribution. Answers "what does the model expect to happen"
+    rather than run_simulations' "how likely is each outcome," giving one
+    coherent win-loss record and (fed into simulate_playoffs_deterministic)
+    one coherent bracket, instead of an aggregate over many random draws.
 
-    A predicted_margin that rounds to exactly 0 (only possible from a
-    near-exact rating tie) is broken toward the home team, consistent with
+    A predicted_margin that rounds to exactly 0 (only possible from a near-
+    exact rating tie) is broken toward the home team, consistent with
     margin_intercept already encoding a real average home-field scoring
     edge from the same historical fit."""
     ratings = dict(starting_ratings)
@@ -182,21 +178,20 @@ def simulate_one_season_deterministic(
 class SimulationResults:
     win_totals: pd.DataFrame  # one row per (sim, team): wins (ties count as 0.5)
     summary: pd.DataFrame  # one row per team: aggregated probabilities
-    # Present only when run_simulations(keep_regular_season_details=True): one
-    # (standings, seeds_by_conference, final_ratings, game_log) tuple per
-    # sim, in sim order -- lets a caller later pick one specific, already-
-    # simulated season (see scripts/run_season_simulation.py's
+    # Present only when run_simulations(keep_regular_season_details=True):
+    # one (standings, seeds_by_conference, final_ratings, game_log) tuple
+    # per sim, in sim order, so a caller can pick one specific, already-
+    # simulated season afterward (see run_season_simulation.py's
     # "representative simulation") without re-running anything. game_log is
-    # that sim's own list of (week, game_id, home_team, away_team, winner,
-    # margin) tuples -- a REAL random draw, so it includes real upsets,
-    # unlike game_probabilities' aggregate "who's favored" view.
+    # that sim's own real, upset-inclusive results, unlike
+    # game_probabilities' aggregate "who's favored" view below.
     regular_season_details: list[tuple] | None = None
-    # One row per SCHEDULED game (not per sim): home_win_prob/avg_margin
-    # aggregated across all n_sims -- "for this specific week's matchup,
-    # what fraction of realistic seasons had the home team winning it".
+    # One row per scheduled game (not per sim): home_win_prob/avg_margin
+    # aggregated across all n_sims, i.e. what fraction of realistic seasons
+    # had the home team winning that specific matchup.
     game_probabilities: pd.DataFrame | None = None
-    # One row per playoff bracket SLOT (e.g. "AFC Wild Card, 2-seed vs
-    # 7-seed") aggregated across all n_sims -- see run_simulations' docstring
+    # One row per playoff bracket slot (e.g. "AFC Wild Card, 2-seed vs
+    # 7-seed") aggregated across all n_sims; see run_simulations' docstring
     # for why slots, not team names, are the stable unit here.
     playoff_slot_probabilities: pd.DataFrame | None = None
 
@@ -215,15 +210,16 @@ def run_simulations(
     seed: int | None = None,
     keep_regular_season_details: bool = False,
 ) -> SimulationResults:
-    """... (existing behavior) ... Also aggregates two per-game/per-slot
-    prediction tables across the same n_sims runs (see SimulationResults):
-    regular-season games have a fixed, known matchup every sim (Week 5 KC @
-    DEN is always Week 5 KC @ DEN), so they're aggregated by game_id
-    directly. Playoff games do NOT -- which two teams meet in, say, the
-    AFC Wild Card round depends on how the regular season went in that
-    specific sim -- so they're aggregated by structural bracket SLOT
-    (conference + round + position, e.g. "the #2 seed's Wild Card game")
-    instead, which every sim fills exactly once regardless of who's in it."""
+    """Runs n_sims full seasons plus playoffs and returns the aggregate
+    results (see SimulationResults). Also builds two per-game/per-slot
+    prediction tables from the same n_sims runs: regular-season games have a
+    fixed, known matchup every sim (Week 5 KC @ DEN is always Week 5 KC @
+    DEN), so they're aggregated by game_id directly. Playoff games don't,
+    since which two teams meet in, say, the AFC Wild Card round depends on
+    how the regular season went in that specific sim. Those get aggregated
+    by structural bracket slot instead (conference + round + position, e.g.
+    "the #2 seed's Wild Card game"), which every sim fills exactly once
+    regardless of who's in it."""
     from nfl_predictor.simulation.playoffs import simulate_playoffs_detailed
 
     rng = np.random.default_rng(seed)
@@ -243,12 +239,12 @@ def run_simulations(
     champion_counts = {t: 0 for t in teams}
 
     for sim in range(n_sims):
-        # Only the ONE sim eventually picked as "representative" (see
-        # scripts/run_season_simulation.py) actually needs its game log kept
-        # -- but which one that'll be isn't known until every sim has run, so
-        # a fresh per-sim list is captured here whenever regular_season_
-        # details is being kept at all, and the unused ones are simply
-        # dropped by the caller.
+        # Only the one sim eventually picked as "representative" (see
+        # scripts/run_season_simulation.py) actually needs its game log kept,
+        # but which one that'll be isn't known until every sim has run. So a
+        # fresh per-sim list is captured here whenever regular_season_details
+        # is being kept at all, and the script just discards the ones it
+        # doesn't end up using.
         sim_game_log = [] if regular_season_details is not None else None
         standings, final_ratings = simulate_one_season(
             schedule,
@@ -380,15 +376,12 @@ def run_simulations(
 
 
 def _tally_playoff_slots(games: list, tally: dict[tuple, dict]) -> None:
-    """Group one bracket's `games` (from simulate_playoffs_detailed) by
-    structural slot -- conference + round + position within that round's
-    fixed play order -- and accumulate win/team-identity stats into `tally`
+    """Groups one bracket's `games` (from simulate_playoffs_detailed) by
+    structural slot (conference, round, and position within that round's
+    fixed play order) and accumulates win/team-identity stats into `tally`
     (mutated in place, shared and called once per sim). See run_simulations'
     docstring for why slots, not team names, are the stable cross-sim unit
-    for playoff games (which two teams meet depends on how that sim's
-    regular season went; the SLOT -- e.g. "the AFC's #2 seed's Wild Card
-    game" -- is filled exactly once every single sim regardless of who's
-    in it)."""
+    here."""
     by_conference: dict[str, list] = {}
     for g in games:
         if g.round != "Super Bowl":

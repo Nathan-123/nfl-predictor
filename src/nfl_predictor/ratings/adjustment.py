@@ -1,11 +1,12 @@
 """Fits how many Elo points each offseason signal (coaching change, QB value
-delta, draft capital added) is actually worth, using real history, instead
-of hand-picking the magnitudes.
+delta, draft capital added, etc.) is actually worth, using real history
+instead of hand-picking the magnitudes.
 
 Target: a team's actual end-of-season Elo rating minus its season-start
-(post mean-reversion) rating -- i.e. how much the team out/underperformed
-the naive carryover. Fit by plain OLS, validated by leave-one-season-out
-cross-validation given the small sample (~4 season transitions x 32 teams).
+(post mean-reversion) rating, i.e. how much it out- or under-performed the
+naive carryover. Fit with plain OLS, validated with leave-one-season-out
+cross-validation since the sample is small (a handful of season transitions
+times 32 teams).
 """
 
 from __future__ import annotations
@@ -25,19 +26,18 @@ FEATURE_COLS = [
     "preseason_win_total",
 ]
 
-# When fitting on a widened regression window, discard transitions from the
-# first few seasons of that window's Elo run -- ratings need a few seasons
-# to move off the synthetic 1500 starting point before a "rating_change" is
-# a meaningful target rather than warm-up noise.
+# When fitting on a widened regression window, the first few seasons of that
+# window get dropped: ratings need a few seasons to move off the synthetic
+# 1500 starting point before "rating_change" means anything beyond warm-up
+# noise.
 ELO_WARMUP_SEASONS = 4
 
-# project_upcoming_season's fallback for a feature missing on the upcoming
-# season's row (e.g. a season whose preseason_win_total hasn't been sourced
-# yet). 0.0 is the right "no signal" neutral for every OTHER feature here --
-# they're all deltas centered near zero -- but 0.0 for preseason_win_total
-# would mean "expected to go 0-17", a false and extremely negative signal,
-# not a neutral one. 8.5 (half of a 17-game season) is the actual neutral
-# point for a raw win total.
+# project_upcoming_season's fallback for a feature that's missing on the
+# upcoming season's row (e.g. preseason_win_total hasn't been sourced yet).
+# 0.0 is the right neutral value for every other feature here, since
+# they're all deltas centered near zero, but 0.0 for preseason_win_total
+# would read as "expected to go 0-17," a strongly negative signal. 8.5,
+# half of a 17-game season, is the actual neutral point for a raw win total.
 FEATURE_FALLBACK = {col: 0.0 for col in FEATURE_COLS}
 FEATURE_FALLBACK["preseason_win_total"] = 8.5
 
@@ -86,13 +86,14 @@ def predict(model: FittedModel, df: pd.DataFrame) -> np.ndarray:
 
 
 def fit_with_loso_cv(features: pd.DataFrame, game_log: pd.DataFrame) -> tuple[FittedModel, pd.DataFrame]:
-    """Merge offseason features with the realized rating-change target, fit
-    the full model, and produce leave-one-season-out cross-validated
-    predictions for every row (an honest, non-overfit adjustment estimate
-    given how few season transitions we have).
+    """Merges offseason features with the realized rating-change target, fits
+    the full model, and produces leave-one-season-out cross-validated
+    predictions for every row. With this few season transitions, evaluating
+    a model on data it was trained on would be too easy to fool ourselves
+    with. LOSO gives an honest read on how well it generalizes.
 
-    Returns (full_model, df) where df has one row per (season, team) that
-    had both complete features and a known outcome, with a
+    Returns (full_model, df), where df has one row per (season, team) with
+    both complete features and a known outcome, plus a
     `loso_predicted_adjustment` column.
     """
     targets = compute_season_rating_changes(game_log)
@@ -124,10 +125,10 @@ def project_upcoming_season(
     features: pd.DataFrame, full_model: FittedModel, upcoming_season: int
 ) -> dict[str, float]:
     """team -> projected adjustment for a season with no known outcome yet
-    (e.g. next season), using the model fit on all available history --
-    there's nothing to leave out for a season that hasn't happened. Missing
-    features (e.g. QB continuity before Week 1 starters are known) fall back
-    to each feature's own neutral point -- see FEATURE_FALLBACK."""
+    (next season, say), using the model fit on all available history --
+    there's nothing to hold out for a season that hasn't happened. Missing
+    features (QB continuity before Week 1 starters are set, for instance)
+    fall back to each feature's own neutral point; see FEATURE_FALLBACK."""
     upcoming = features[features["season"] == upcoming_season].copy()
     upcoming[FEATURE_COLS] = upcoming[FEATURE_COLS].fillna(FEATURE_FALLBACK)
     upcoming["projected_adjustment"] = predict(full_model, upcoming)
@@ -148,26 +149,27 @@ class AdjustedEloPipeline:
 
 
 def fit_adjusted_elo_pipeline(start_season: int, regression_start_season: int | None = None) -> AdjustedEloPipeline:
-    """The complete Stage 1 -> Stage 1b pipeline in one call: baseline Elo,
-    offseason features, LOSO-fit adjustment model, and Elo re-run with those
-    adjustments applied. Shared by every script that needs "the current
+    """Runs the full Stage 1 -> Stage 1b pipeline in one call: baseline Elo,
+    offseason features, the LOSO-fit adjustment model, then an Elo re-run
+    with those adjustments applied. Every script that needs "the current
     adjusted ratings" (run_offseason_adjustment.py, the season simulator)
-    so they can't silently drift from each other.
+    goes through this, so they can't quietly drift out of sync with each
+    other.
 
-    start_season: the PRODUCTION Elo engine's start -- current ratings,
-    backtest numbers, and what Stage 3 consumes are all anchored here and
-    unaffected by regression_start_season.
+    start_season: the production Elo engine's start. Current ratings,
+    backtest numbers, and everything Stage 3 consumes are anchored here and
+    don't move with regression_start_season.
 
-    regression_start_season: if given and earlier than start_season, the
-    offseason-adjustment model is instead fit on a WIDER window of season-
-    transitions -- more independent trials to fit on -- via a second,
+    regression_start_season: if set earlier than start_season, the
+    offseason-adjustment model gets fit on a wider window of season
+    transitions (more independent trials to learn from) via a second,
     separate Elo run used only to generate (season, team, rating_change)
-    targets (see ratings.pipeline.run). The first ELO_WARMUP_SEASONS of
-    that wider run are dropped before fitting (ratings need time to move
-    off the synthetic 1500 start). The resulting season_adjustments dict
-    naturally only gets *used* for whichever (season, team) keys the
-    production run's season boundaries look up, so extra pre-start_season
-    entries in it are harmless.
+    targets (see ratings.pipeline.run). The first ELO_WARMUP_SEASONS of that
+    wider run get dropped before fitting, since ratings need time to move
+    off the synthetic 1500 start. The resulting season_adjustments dict only
+    ever gets looked up for (season, team) keys the production run's season
+    boundaries actually hit, so the extra pre-start_season entries in it are
+    harmless.
     """
     from nfl_predictor.ratings.offseason_features import build_offseason_features
     from nfl_predictor.ratings.pipeline import run as run_elo
@@ -181,9 +183,10 @@ def fit_adjusted_elo_pipeline(start_season: int, regression_start_season: int | 
 
     features = build_offseason_features(regression_start, max_season + 1)
     if widened:
-        # Only the widened path needs a warm-up discard -- build_offseason_features
-        # already excludes the very first (no-prior-season) row on its own, which
-        # is all the non-widened path ever relied on.
+        # Only the widened path needs the warm-up seasons dropped --
+        # build_offseason_features already excludes the very first row (no
+        # prior season to compare against), which is all the non-widened
+        # path ever relied on.
         trusted_from = regression_start + ELO_WARMUP_SEASONS
         features = features[features["season"] >= trusted_from].reset_index(drop=True)
 
