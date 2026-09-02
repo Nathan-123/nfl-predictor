@@ -254,7 +254,7 @@ def test_run_simulations_keeps_regular_season_details_when_requested():
         keep_regular_season_details=True,
     )
     assert len(results.regular_season_details) == 5
-    rec_standings, seeds_by_conference, final_ratings = results.regular_season_details[0]
+    rec_standings, seeds_by_conference, final_ratings, game_log = results.regular_season_details[0]
     assert rec_standings["T1"].wins + rec_standings["T1"].losses + rec_standings["T1"].ties == 3
     assert len(seeds_by_conference["CONF_A"]) == 7
     assert set(final_ratings) == set(starting_ratings)
@@ -262,6 +262,114 @@ def test_run_simulations_keeps_regular_season_details_when_requested():
     # own row for the same sim -- the two shouldn't be able to silently drift.
     row = results.win_totals[(results.win_totals["sim"] == 0) & (results.win_totals["team"] == "T1")].iloc[0]
     assert rec_standings["T1"].wins + 0.5 * rec_standings["T1"].ties == row["wins"]
+    # The stored game_log must be internally consistent with the standings it
+    # was captured alongside: tallying its own per-game winners for T1 should
+    # reproduce the exact same win/loss/tie counts.
+    assert len(game_log) == len(schedule)
+    t1_results = [winner for (_, _, home, away, winner, _) in game_log if "T1" in (home, away)]
+    assert sum(w == "T1" for w in t1_results) == rec_standings["T1"].wins
+    assert sum(w == "TIE" for w in t1_results) == rec_standings["T1"].ties
+
+
+def test_run_simulations_replacing_playoffs_matches_old_aggregate_counts():
+    # simulate_playoffs_detailed replaced simulate_playoffs inside the hot
+    # loop; the aggregate counts derived from its games list must still sum
+    # to the same totals the old PlayoffResult-based bookkeeping produced
+    # (same invariants as test_full_simulation_pipeline_is_internally_consistent,
+    # cheaper here on the toy league).
+    schedule, starting_ratings, divisions, conferences = _toy_league_of_14()
+    results = season.run_simulations(
+        n_sims=50,
+        schedule=schedule,
+        starting_ratings=starting_ratings,
+        hfa=25.0,
+        k=20.0,
+        margin_intercept=1.0,
+        margin_slope=0.04,
+        margin_std=10.0,
+        divisions=divisions,
+        conferences=conferences,
+        seed=7,
+    )
+    summary = results.summary
+    assert summary["playoff_prob"].sum() == pytest.approx(14.0)  # 7 teams x 2 conferences, every sim
+    assert summary["won_wildcard_prob"].sum() == pytest.approx(8.0)  # 4 survivors x 2 conferences
+    assert summary["conf_championship_prob"].sum() == pytest.approx(4.0)  # 2 finalists x 2 conferences
+    assert summary["super_bowl_prob"].sum() == pytest.approx(2.0)  # 1 champion x 2 conferences
+    assert summary["champion_prob"].sum() == pytest.approx(1.0)  # exactly 1 champion, every sim
+
+
+def test_game_probabilities_cover_every_scheduled_game_and_are_valid_probabilities():
+    schedule, starting_ratings, divisions, conferences = _toy_league_of_14()
+    results = season.run_simulations(
+        n_sims=50,
+        schedule=schedule,
+        starting_ratings=starting_ratings,
+        hfa=25.0,
+        k=20.0,
+        margin_intercept=1.0,
+        margin_slope=0.04,
+        margin_std=10.0,
+        divisions=divisions,
+        conferences=conferences,
+        seed=3,
+    )
+    probs = results.game_probabilities
+    assert set(probs["game_id"]) == set(schedule["game_id"])  # every scheduled game gets a row, none extra
+    assert probs["home_win_prob"].between(0, 1).all()
+    assert (
+        (probs["predicted_winner"] == probs["home_team"]) == (probs["home_win_prob"] >= 0.5)
+    ).all()
+
+
+def test_game_probabilities_favor_the_much_stronger_team():
+    # An extreme rating gap should produce a near-certain (not just >50%)
+    # home win probability, distinguishing "aggregated across real sims"
+    # from a coin flip.
+    schedule = pd.DataFrame([{"home_team": "STRONG", "away_team": "WEAK", "week": 1, "game_id": "g1"}])
+    game_tally: dict = {}
+    rng = np.random.default_rng(5)
+    for _ in range(500):
+        season.simulate_one_season(
+            schedule=schedule,
+            starting_ratings={"STRONG": 2000.0, "WEAK": 1000.0},
+            hfa=0.0,
+            k=20.0,
+            margin_intercept=0.0,
+            margin_slope=0.04,
+            margin_std=13.0,
+            divisions={"STRONG": "DIV", "WEAK": "DIV"},
+            conferences={"STRONG": "CONF", "WEAK": "CONF"},
+            rng=rng,
+            game_tally=game_tally,
+        )
+    win_credit, _, n = game_tally["g1"]
+    assert win_credit / n > 0.95
+
+
+def test_playoff_slot_probabilities_cover_every_slot_every_sim():
+    schedule, starting_ratings, divisions, conferences = _toy_league_of_14()
+    n_sims = 50
+    results = season.run_simulations(
+        n_sims=n_sims,
+        schedule=schedule,
+        starting_ratings=starting_ratings,
+        hfa=25.0,
+        k=20.0,
+        margin_intercept=1.0,
+        margin_slope=0.04,
+        margin_std=10.0,
+        divisions=divisions,
+        conferences=conferences,
+        seed=11,
+    )
+    slots = results.playoff_slot_probabilities
+    # 3 Wild Card + 2 Divisional + 1 Conf Championship, per conference, + 1 Super Bowl.
+    assert len(slots) == 2 * 6 + 1
+    assert (slots["n_sims"] == n_sims).all()  # every slot filled in every single sim, none sparse
+    assert slots["home_side_win_prob"].between(0, 1).all()
+    assert slots["matchup_occurrence_pct"].between(0, 1).all()
+    assert (slots["round"] == "Super Bowl").sum() == 1
 
 
 def test_simulate_playoffs_detailed_produces_a_full_bracket():

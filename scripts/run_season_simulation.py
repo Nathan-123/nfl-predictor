@@ -34,6 +34,9 @@ WIN_TOTALS_PATH = PROCESSED_DIR / "season_simulation_win_totals.parquet"
 SUMMARY_PATH = PROCESSED_DIR / "season_simulation_summary.parquet"
 PROJECTED_RECORD_PATH = PROCESSED_DIR / "projected_final_record.csv"
 PROJECTED_BRACKET_PATH = PROCESSED_DIR / "projected_playoff_bracket.csv"
+REPRESENTATIVE_GAMES_PATH = PROCESSED_DIR / "representative_season_games.csv"
+GAME_PROBABILITIES_PATH = PROCESSED_DIR / "game_win_probabilities.csv"
+PLAYOFF_SLOT_PROBABILITIES_PATH = PROCESSED_DIR / "playoff_slot_probabilities.csv"
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,6 +106,34 @@ def main() -> None:
         display[col] = (display[col] * 100).round(1)
     print(display.to_string(index=False))
 
+    # ---- per-game / per-slot win probabilities, aggregated across all sims -
+    # The actual "best possible prediction for every game" output: for each
+    # scheduled regular-season game, what fraction of the n_sims runs above
+    # had the home team winning THAT SPECIFIC matchup (properly accounting
+    # for the fact that by, say, Week 10, each sim's teams carry whatever
+    # rating drift that sim's own earlier random results produced). Playoff
+    # games are aggregated by structural bracket slot instead of team name,
+    # since who's even IN a given playoff game depends on the regular season
+    # -- see run_simulations' docstring.
+    game_probs_display = results.game_probabilities.copy()
+    game_probs_display["home_win_prob"] = (game_probs_display["home_win_prob"] * 100).round(1)
+    game_probs_display["avg_margin"] = game_probs_display["avg_margin"].round(1)
+    results.game_probabilities.to_csv(GAME_PROBABILITIES_PATH, index=False)
+
+    print(f"\n{upcoming_season} game-by-game win probabilities (every scheduled game, aggregated across all {args.n_sims} sims):\n")
+    print(game_probs_display.to_string(index=False))
+
+    slot_probs_display = results.playoff_slot_probabilities.copy()
+    slot_probs_display["matchup_occurrence_pct"] = (slot_probs_display["matchup_occurrence_pct"] * 100).round(1)
+    slot_probs_display["home_side_win_prob"] = (slot_probs_display["home_side_win_prob"] * 100).round(1)
+    results.playoff_slot_probabilities.to_csv(PLAYOFF_SLOT_PROBABILITIES_PATH, index=False)
+
+    print(f"\n{upcoming_season} playoff bracket-slot win probabilities (aggregated across all {args.n_sims} sims):\n")
+    print(slot_probs_display.to_string(index=False))
+
+    print(f"\nSaved: {GAME_PROBABILITIES_PATH}")
+    print(f"Saved: {PLAYOFF_SLOT_PROBABILITIES_PATH}")
+
     # ---- one realistic representative simulation: record + bracket --------
     # A complement to the Monte Carlo summary above, but built from a REAL
     # simulated season (real random variance -- favorites do sometimes lose)
@@ -116,7 +147,31 @@ def main() -> None:
     win_pivot = results.win_totals.pivot(index="sim", columns="team", values="wins")
     squared_error = ((win_pivot - target_wins) ** 2).sum(axis=1)
     representative_sim = int(squared_error.idxmin())
-    rep_standings, rep_seeds_by_conference, rep_ratings = results.regular_season_details[representative_sim]
+    rep_standings, rep_seeds_by_conference, rep_ratings, rep_game_log = results.regular_season_details[representative_sim]
+
+    # This sim's own real game-by-game results -- includes real upsets,
+    # unlike game_win_probabilities.csv's aggregate "who's favored" view.
+    # Joined against that same aggregate table so an "upset" (the model's
+    # favorite actually lost, in this specific realistic draw) is flagged
+    # explicitly rather than left for the reader to spot by eye.
+    rep_games_df = pd.DataFrame(rep_game_log, columns=["week", "game_id", "home_team", "away_team", "winner", "margin"])
+    rep_games_df = rep_games_df.merge(
+        results.game_probabilities[["game_id", "home_win_prob", "predicted_winner"]], on="game_id", how="left"
+    )
+    rep_games_df["upset"] = (rep_games_df["winner"] != "TIE") & (rep_games_df["winner"] != rep_games_df["predicted_winner"])
+    rep_games_df = rep_games_df.sort_values(["week", "game_id"]).reset_index(drop=True)
+    rep_games_df.to_csv(REPRESENTATIVE_GAMES_PATH, index=False)
+
+    n_upsets = int(rep_games_df["upset"].sum())
+    print(
+        f"\n{upcoming_season} representative-simulation game log "
+        f"({n_upsets} of {len(rep_games_df)} games were upsets vs. the aggregate favorite):\n"
+    )
+    rep_games_display = rep_games_df.copy()
+    rep_games_display["home_win_prob"] = (rep_games_display["home_win_prob"] * 100).round(1)
+    rep_games_display["margin"] = rep_games_display["margin"].round(1)
+    print(rep_games_display.to_string(index=False))
+    print(f"\nSaved: {REPRESENTATIVE_GAMES_PATH}")
 
     seed_lookup = {t: i + 1 for seeds in rep_seeds_by_conference.values() for i, t in enumerate(seeds)}
     record_rows = [
