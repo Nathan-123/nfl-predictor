@@ -2,11 +2,13 @@
 
 Predicts NFL games, full seasons, and the playoffs using public data. Team
 ratings, an offseason layer that turns roster/coaching changes into rating
-shifts, a game outcome model, and a Monte Carlo simulator that plays out an
-entire season (and the postseason) thousands of times.
+shifts, a game outcome model, a Monte Carlo simulator that plays out an
+entire season (and the postseason) thousands of times, and a weekly review
+loop that checks the model's own predictions against reality once games
+start.
 
 Every weight in this pipeline is fit from real historical outcomes, not
-picked by hand, and every stage gets backtested against a coin-flip
+picked by hand, and every step gets backtested against a coin-flip
 baseline and the betting market before I trust it.
 
 ## Contents
@@ -14,7 +16,8 @@ baseline and the betting market before I trust it.
 - [How it's built](#how-its-built)
 - [Setup](#setup)
 - [Running the pipeline end to end](#running-the-pipeline-end-to-end)
-- [Stage by stage](#stage-by-stage)
+- [Step by step](#step-by-step)
+- [Weekly prediction review](#weekly-prediction-review)
 - [Output files](#output-files)
 - [Data sources](#data-sources)
 - [Tests](#tests)
@@ -23,7 +26,9 @@ baseline and the betting market before I trust it.
 
 ## How it's built
 
-Four stages, each building on the last, plus a reporting layer on top.
+Four steps, each building on the last, plus a reporting layer on top and a
+weekly review loop once the season is actually underway (see
+[Weekly prediction review](#weekly-prediction-review) below).
 
 **1. Elo ratings** (`ratings/elo.py`, `ratings/pipeline.py`). A standard
 FiveThirtyEight-style Elo engine. Every played game updates both teams'
@@ -36,7 +41,7 @@ going into a new season, which throws away information we actually have in
 the offseason: did the coach change, is the new QB better or worse than the
 old one, how much draft capital came in, how did the skill-position/
 special-teams/defensive rooms turn over, what does the market's own
-preseason win total say. This stage fits how many Elo points each of those
+preseason win total say. This step fits how many Elo points each of those
 signals is worth, using plain OLS on real season-to-season history,
 validated with leave-one-season-out cross-validation, rather than guessing
 at the numbers.
@@ -54,7 +59,7 @@ simulator.
 drives the season sim, because a season is recursive: each simulated result
 changes both teams' ratings before the next game gets played, which is
 exactly what Elo is built for. The GBM's best features only exist for real,
-already-played games. This stage runs the full schedule thousands of times
+already-played games. This step runs the full schedule thousands of times
 with real NFL tiebreak rules and division/wild-card seeding, then simulates
 the resulting playoff bracket (with real re-seeding, not a fixed bracket)
 for every one of those seasons.
@@ -82,6 +87,11 @@ No package install step needed. Every script under `scripts/` adds `src/`
 to `sys.path` itself, so `python scripts/<name>.py` works as long as the
 path to the script is right.
 
+On a very new Python (3.13+, especially on Windows with no C compiler
+installed), `pip install` may try to build numpy from source instead of
+finding a prebuilt wheel, and fail in its meson/compiler step. If that
+happens, retry with `pip install --only-binary=:all: -r requirements.txt`.
+
 `data/raw/` (fetched source data) and `data/processed/` (model output) are
 both gitignored and empty on a fresh clone. The first pipeline run below
 populates `data/raw/`. The one exception is
@@ -90,8 +100,8 @@ committed to the repo since it can't be regenerated automatically.
 
 ## Running the pipeline end to end
 
-Run these in order from the repo root. Each stage reads the previous
-stage's cached output, so skipping a step (or running an early one with a
+Run these in order from the repo root. Each step reads the previous
+step's cached output, so skipping a step (or running an early one with a
 narrower season range than a later one needs) shows up as a missing-file or
 empty-data error.
 
@@ -131,7 +141,12 @@ market's own win totals shift throughout the offseason. It re-derives
 everything from steps 2 and 3 internally, so there's no need to re-run
 those first unless the underlying cached data changed.
 
-## Stage by stage
+Once Week 1 actually kicks off, stop re-running step 5 (see
+[Weekly prediction review](#weekly-prediction-review) for why) and instead
+run `scripts/run_weekly_review.py` once a week to grade the predictions
+already made against what actually happened.
+
+## Step by step
 
 ### 1. Elo ratings
 
@@ -237,6 +252,48 @@ and the final record. All three sections come from the exact same simulated
 season, so they can't disagree with each other the way independently
 picking each game's favorite would.
 
+## Weekly prediction review
+
+Once games start, run this once a week after that week's games wrap up:
+
+```bash
+python scripts/run_weekly_review.py --season 2026
+```
+
+Grades every newly-completed game (regular season or playoffs) against
+its pregame prediction and appends one row per game to
+`data/processed/season_review.csv`: right or wrong, and for the wrong
+ones, a short rule-based explanation built from data the pipeline already
+has -- actual turnover margin, actual offensive EPA vs. that team's
+pregame rolling form, an unplanned starting-QB change, or a real injury
+report. No fitting, no external API calls, just the same "back it with
+real numbers" approach the rest of this pipeline uses (`review/explain.py`
+has the exact factors and thresholds). Idempotent: safe to re-run midweek
+without duplicating already-graded games.
+
+Before grading, it refetches `schedules` and `injuries` across their full
+history (`--fetch-start-season` through `--season`) and `pbp` for just
+`--season`. The first two are single whole-history files rather than
+partitioned per season the way `pbp` is, so narrowing their range to just
+`--season` would silently overwrite every other cached season -- it did
+once, which is why this fetch is split like this. Pass `--skip-fetch` to
+reuse whatever's already cached instead (e.g. offline, or in a test).
+
+Regular-season games are graded against `game_win_probabilities.csv`,
+which is written once, before Week 1, and never touched again for the
+rest of the season -- see `run_weekly_review.py`'s own docstring for why
+that matters. Playoff games don't have a preseason equivalent (which two
+teams meet in a given round isn't knowable before the season starts), so
+those get graded against a fresh prediction from the same Elo model,
+carried forward through the real games actually played, the moment their
+real matchup is set.
+
+`season_review.csv` isn't read by any part of the prediction pipeline
+yet. It's meant to become a new offseason-adjustment feature once a full
+season of it exists to design and validate that feature against, but not
+before, and never for the season currently in progress -- predictions
+stay fixed once the season starts.
+
 ## Output files
 
 Everything lands in `data/processed/`.
@@ -254,6 +311,7 @@ Everything lands in `data/processed/`.
 | `projected_final_record.csv` | `run_season_simulation.py` | The representative simulation's real final standings |
 | `projected_playoff_bracket.csv` | `run_season_simulation.py` | The representative simulation's real playoff bracket |
 | `prediction_report.csv` | `build_prediction_report.py` | All three representative-simulation outputs combined into one file |
+| `season_review.csv` | `run_weekly_review.py` | One row per completed game: right/wrong against its pregame prediction, and why for the misses |
 
 The `.csv` copies exist alongside `.parquet` so they can be opened directly
 in a text editor or spreadsheet app. A `.parquet` file isn't readable
@@ -285,6 +343,16 @@ season-range quirks. `team_codes.py` reconciles the inconsistent team
 abbreviations different sources use for relocated franchises (Rams,
 Chargers, Raiders) and historical short-code variants.
 
+`nfl_data_py` itself (0.3.2) has two real bugs `data/fetch.py` works
+around rather than hitting directly: `import_seasonal_pfr` stopped
+accepting `"def"` as a valid stat type even though nflverse still
+publishes that file at the same URL the library would use (fetched
+directly instead), and `import_pbp_data`'s separate participation-data
+merge throws an unhandled `NameError` once a season is in progress and
+that file hasn't been published yet for it (skipped entirely --
+nothing here reads a participation-only column anyway). Worth
+re-checking both if `nfl_data_py` ever gets upgraded.
+
 ## Tests
 
 ```bash
@@ -294,11 +362,16 @@ pytest tests/ -q
 Most of these are pure unit tests on synthetic data (mock rosters,
 play-by-play, schedules) and need no network access. A handful are
 integration tests that read the real cached `data/raw/` files, so they need
-step 1 above to have been run at least once. `test_pipeline.py` is the one
-real network test in the suite: a smoke test that hits nfl_data_py's hosted
-files directly, redirected to a throwaway temp directory for the duration
-of the module so it never touches the real cache. It's included by default
-in the command above, so leave it out explicitly if you're offline:
+step 1 above to have been run at least once. Two of those (in
+`test_season_simulation.py`) only mean something in the offseason -- they
+project and simulate "the upcoming season," which doesn't exist once that
+season's own games are actually underway in the cache -- and skip
+themselves with an explanation rather than fail once that's the case.
+`test_pipeline.py` is the one real network test in the suite: a smoke test
+that hits nfl_data_py's hosted files directly, redirected to a throwaway
+temp directory for the duration of the module so it never touches the real
+cache. It's included by default in the command above, so leave it out
+explicitly if you're offline:
 
 ```bash
 pytest tests/ -q --ignore=tests/test_pipeline.py
@@ -323,7 +396,7 @@ src/nfl_predictor/
     adjustment.py           - fits/applies the offseason adjustment model
 
   gamemodel/
-    features.py  - Stage 2 feature table (rolling EPA, etc.)
+    features.py  - game-model feature table (rolling EPA, etc.)
     model.py     - XGBoost fit + walk-forward backtest
 
   simulation/
@@ -332,7 +405,13 @@ src/nfl_predictor/
     playoffs.py   - single-elimination bracket simulation
     reporting.py  - combines representative-sim outputs into a report
 
-scripts/  - one CLI entrypoint per stage (see "Stage by stage" above)
+  review/
+    explain.py   - rule-based "why was this wrong" factors, pure functions
+    pipeline.py  - grades completed games, appends to season_review.csv
+
+scripts/  - one CLI entrypoint per pipeline step (see "Step by step" above),
+            plus run_pipeline.py (fetch) and run_weekly_review.py (see
+            "Weekly prediction review" above)
 tests/    - pytest suite, one file per module above
 
 data/
@@ -365,3 +444,12 @@ The GBM and the season simulator aren't the same model. The GBM is a
 useful standalone accuracy comparison, but it isn't what actually drives
 the season simulation's game-by-game outcomes. Elo is, for the recursive-
 rating reason described above.
+
+The weekly review's explanation thresholds are round numbers, not fit
+from real outcomes, unlike every other threshold in this pipeline
+(MIN_DROPBACKS, MIN_COVERAGE_TARGETS, the 0.4 regression fraction, ...),
+which did get checked against real data before being trusted.
+`season_review.csv` has real graded games in it now, but not yet a full
+season's worth, and nothing has gone back to check these thresholds
+against it. Worth doing once there's a real season of upsets to check
+them against.
