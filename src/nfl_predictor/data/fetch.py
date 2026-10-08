@@ -63,11 +63,25 @@ def fetch_win_totals(years: list[int]) -> pd.DataFrame:
 
 
 def fetch_pbp(years: list[int]) -> pd.DataFrame:
-    return nfl.import_pbp_data(years, downcast=True)
+    # include_participation=True (the default) makes nfl_data_py also merge
+    # in a separate per-year "participation" file, which lags well behind
+    # the raw pbp file for the current in-progress season -- and when that
+    # 404s, import_pbp_data's own error handling references an undefined
+    # `Error` name instead of a real exception class, crashing with a
+    # NameError that obscures the real "not published yet" cause. Nothing
+    # in this codebase reads a participation-only column (offense_personnel
+    # etc.), so just skip that merge entirely.
+    return nfl.import_pbp_data(years, downcast=True, include_participation=False)
 
 
 def fetch_pfr_def_stats(years: list[int]) -> pd.DataFrame:
-    return nfl.import_seasonal_pfr("def", years)
+    # nfl_data_py.import_seasonal_pfr only accepts s_type in {"pass", "rec",
+    # "rush"} as of 0.3.2; "def" got dropped from its validation, even
+    # though nflverse-data still publishes the file at the same URL the
+    # library itself would use. Read it directly to route around that.
+    url = "https://github.com/nflverse/nflverse-data/releases/download/pfr_advstats/advstats_season_def.parquet"
+    df = pd.read_parquet(url)
+    return df[df["season"].isin(years)] if years else df
 
 
 def fetch_snap_counts(years: list[int]) -> pd.DataFrame:
