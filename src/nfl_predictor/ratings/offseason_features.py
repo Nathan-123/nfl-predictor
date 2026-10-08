@@ -74,6 +74,8 @@ def compute_qb_value_by_season(seasons: list[int]) -> pd.DataFrame:
             continue
         pbp = pd.read_parquet(path, columns=["passer_id", "qb_dropback", "qb_epa"])
         pbp = pbp[(pbp["qb_dropback"] == 1) & pbp["passer_id"].notna() & pbp["qb_epa"].notna()]
+        if pbp.empty:  # an all-object-dtype empty frame would poison the concat below
+            continue
         agg = pbp.groupby("passer_id")["qb_epa"].agg(epa_per_dropback="mean", n_dropbacks="count").reset_index()
         agg["season"] = season
         frames.append(agg)
@@ -235,6 +237,8 @@ def compute_skill_value_by_season(seasons: list[int]) -> pd.DataFrame:
             .rename_axis("player_id")
         )
         combined = rush_value.add(rec_value, fill_value=0.0).rename("skill_value").reset_index()
+        if combined.empty:  # an all-object-dtype empty frame would poison the concat below
+            continue
         combined["season"] = season
         frames.append(combined)
     if not frames:
@@ -345,6 +349,8 @@ def compute_special_teams_value_by_season(seasons: list[int]) -> pd.DataFrame:
             .rename_axis("player_id")
         )
         combined = kicking_value.add(punting_value, fill_value=0.0).rename("special_teams_value").reset_index()
+        if combined.empty:  # an all-object-dtype empty frame would poison the concat below
+            continue
         combined["season"] = season
         frames.append(combined)
     if not frames:
