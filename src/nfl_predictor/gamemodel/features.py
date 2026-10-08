@@ -29,9 +29,12 @@ FEATURE_COLS = [
 ]
 
 
-def _team_game_epa(seasons: list[int]) -> pd.DataFrame:
+def team_game_epa(seasons: list[int]) -> pd.DataFrame:
     """game_id, season, week, team, off_epa, def_epa. One row per team per
-    game, so each game_id appears twice, once per side."""
+    game, so each game_id appears twice, once per side. Public because
+    review.pipeline also needs each team's actual per-game EPA (to compare
+    against their pregame rolling average), not just the rolling version
+    build_rolling_epa produces below."""
     frames = []
     for season in seasons:
         path = PBP_DIR / f"{season}.parquet"
@@ -57,7 +60,9 @@ def build_rolling_epa(seasons: list[int], window: int = ROLLING_WINDOW) -> pd.Da
     runs across season boundaries with no reset at Week 1; "recent form"
     carrying a few games into a new season is intentional, not a bug.
     """
-    team_games = _team_game_epa(seasons).sort_values(["team", "season", "week"])
+    team_games = team_game_epa(seasons).sort_values(["team", "season", "week"])
+    if team_games.empty:  # groupby.transform on a 0-row frame raises, rather than returning empty
+        return pd.DataFrame(columns=["game_id", "team", "off_epa_roll", "def_epa_roll"])
     grouped = team_games.groupby("team")[["off_epa", "def_epa"]]
     rolled = grouped.transform(lambda s: s.shift(1).rolling(window, min_periods=1).mean())
     team_games = team_games.assign(off_epa_roll=rolled["off_epa"], def_epa_roll=rolled["def_epa"])

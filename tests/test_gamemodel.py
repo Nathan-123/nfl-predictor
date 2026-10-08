@@ -59,6 +59,16 @@ def test_rolling_epa_does_not_leak_future_games(tmp_path, monkeypatch):
     assert np.isnan(rolling.loc[("g1", "TEAM"), "off_epa_roll"]) or rolling.loc[("g1", "TEAM"), "off_epa_roll"] < 10
 
 
+def test_rolling_epa_handles_no_cached_pbp_at_all(tmp_path, monkeypatch):
+    # No <season>.parquet written at all -- team_game_epa comes back with 0
+    # rows, and groupby.transform on an empty frame raises rather than just
+    # returning empty, so build_rolling_epa needs its own guard for this.
+    monkeypatch.setattr(F, "PBP_DIR", tmp_path)
+    rolling = F.build_rolling_epa([2021])
+    assert rolling.empty
+    assert list(rolling.columns) == ["game_id", "team", "off_epa_roll", "def_epa_roll"]
+
+
 # ---- QB continuity -----------------------------------------------------------
 
 
