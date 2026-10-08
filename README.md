@@ -17,6 +17,7 @@ baseline and the betting market before I trust it.
 - [Setup](#setup)
 - [Running the pipeline end to end](#running-the-pipeline-end-to-end)
 - [Step by step](#step-by-step)
+- [Results](#results)
 - [Weekly prediction review](#weekly-prediction-review)
 - [Output files](#output-files)
 - [Data sources](#data-sources)
@@ -251,6 +252,43 @@ pregame confidence and an explicit upset flag), the real playoff bracket,
 and the final record. All three sections come from the exact same simulated
 season, so they can't disagree with each other the way independently
 picking each game's favorite would.
+
+## Results
+
+Backtest numbers as of 2026-10-07, from the exact commands in
+[Running the pipeline end to end](#running-the-pipeline-end-to-end)
+(`--start-season 2021` throughout). 2026 is still in progress, so its 64
+played games (through Week 4) are included, not a full season's worth.
+"vs. 50/50" is the % reduction in Brier score against the coin-flip
+baseline on that row's own window; "Brier vs. market" is that row's Brier
+minus the market's (positive means the market is better, which it is
+everywhere here).
+
+| Model | Seasons scored | Games | Games w/ odds | Brier | Log loss | vs. 50/50 | Brier vs. market | Pick accuracy |
+|---|---|---|---|---|---|---|---|---|
+| 50/50 baseline | 2021-2026 | 1,488 | - | 0.2493 | 0.6931 | - | - | ~50% |
+| Elo | 2021-2026 | 1,488 | 1,488 (100%) | 0.2248 | 0.6421 | +9.8% | +0.0130 | 62.9% |
+| Elo + offseason adjustment | 2021-2026 | 1,488 | 1,488 (100%) | 0.2228 | 0.6380 | +10.6% | +0.0110 | 63.9% |
+| Betting market | 2021-2026 | 1,488 | 1,488 (100%) | 0.2118 | 0.6125 | +15.0% | - | 66.2% |
+| XGBoost game model (GBM) | 2023-2026 | 919 | 919 (100%) | 0.2234 | 0.6384 | +10.5% | +0.0121 | 64.2% |
+
+The GBM's walk-forward split needs its first two seasons (2021-2022) as
+train-only warmup, so its test window starts two seasons later than the
+Elo rows' -- not directly comparable to them at face value. Over that
+same narrower 2023-2026 window (919 games), Elo + offseason adjustment
+scores Brier 0.2185 / 66.1% pick accuracy and the market scores Brier
+0.2113 / 67.6%, so the GBM still doesn't beat either one on its own turf.
+
+Pick accuracy excludes the handful of real ties (4 of 1,488 games; 1 of
+919) from the denominator, since neither side "won" them. Two fitting
+choices behind these numbers were validated using data that overlaps the
+reported window -- the Elo mean-reversion fraction (0.4) was originally
+swept against this same 2021+ backtest, and the offseason-adjustment
+coefficients are fit by leave-one-season-out CV across 2008-2026, which
+lets a given season's fit see transitions from seasons chronologically
+after it -- but refitting both in a strictly earlier-only, walk-forward
+way instead changes the reported Brier by 0.0001 either way, i.e. not
+materially.
 
 ## Weekly prediction review
 
