@@ -1,4 +1,4 @@
-"""Tests for Stage 4: playoff bracket simulation. Covers bracket advancement,
+"""Tests for the playoff bracket simulation. Covers bracket advancement,
 divisional re-seeding, no-tie resampling, and neutral-site handling, all on
 synthetic data, plus an integration check (folded into
 test_season_simulation.py's internal-consistency test)."""

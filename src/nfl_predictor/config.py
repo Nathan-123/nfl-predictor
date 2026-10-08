@@ -26,11 +26,12 @@ MIN_SEASON = {
 # Datasets that always get fetched further back than a run's requested start
 # season. draft_picks needs mature (4+ year old) classes to fit the
 # pick-value curve (ratings/offseason_features.py), which the 2021+ default
-# alone wouldn't leave old enough. schedules/pbp/rosters need the same
-# widening for the offseason-adjustment regression, but that's specific to
-# one caller, not every run, so they're widened with a one-off backfill
-# instead (`run_pipeline.py --datasets schedules,rosters,pbp --start-season
-# 2007`) rather than listed here.
+# alone wouldn't leave old enough.
+#
+# schedules/pbp/rosters need that same widening too, but only for the
+# offseason-adjustment regression, not every run, so they're widened with
+# a one-off backfill instead (`run_pipeline.py --datasets
+# schedules,rosters,pbp --start-season 2007`) rather than listed here.
 EXTENDED_START_SEASON = {
     "draft_picks": 2005,
 }

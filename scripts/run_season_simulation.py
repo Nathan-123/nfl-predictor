@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""CLI entrypoint for Stage 3 (regular season) + Stage 4 (playoffs): Monte
-Carlo simulation of the upcoming NFL season through to a Super Bowl champion.
+"""CLI entrypoint for the season and playoff simulation: Monte Carlo
+simulation of the upcoming NFL season through to a Super Bowl champion.
 
 Example:
     python scripts/run_season_simulation.py --n-sims 10000
@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    print("Fitting Elo (Stage 1) + offseason adjustment (Stage 1b)...")
+    print("Fitting Elo ratings + the offseason adjustment layer...")
     pipeline = fit_adjusted_elo_pipeline(args.start_season, regression_start_season=args.regression_start_season)
     upcoming_season = pipeline.max_season + 1
 
@@ -109,12 +109,13 @@ def main() -> None:
     # ---- per-game / per-slot win probabilities, aggregated across all sims
     # The "best possible prediction for every game" output: for each
     # scheduled regular-season game, what fraction of the n_sims runs above
-    # had the home team winning that specific matchup, properly accounting
-    # for the fact that by, say, Week 10, each sim's teams carry whatever
-    # rating drift that sim's own earlier random results produced. Playoff
-    # games get aggregated by structural bracket slot instead of team name,
-    # since who's even in a given playoff game depends on the regular
-    # season; see run_simulations' docstring.
+    # had the home team winning that matchup, properly accounting for
+    # rating drift: by, say, Week 10, each sim's teams carry whatever
+    # rating changes that sim's own earlier random results produced.
+    #
+    # Playoff games get aggregated by structural bracket slot instead of
+    # team name, since who's even in a given playoff game depends on the
+    # regular season; see run_simulations' docstring.
     game_probs_display = results.game_probabilities.copy()
     game_probs_display["home_win_prob"] = (game_probs_display["home_win_prob"] * 100).round(1)
     game_probs_display["avg_margin"] = game_probs_display["avg_margin"].round(1)
@@ -135,14 +136,16 @@ def main() -> None:
     print(f"Saved: {PLAYOFF_SLOT_PROBABILITIES_PATH}")
 
     # ---- one realistic representative simulation: record + bracket --------
-    # A complement to the Monte Carlo summary above, but built from a real
+    # A complement to the Monte Carlo summary above, built from a real
     # simulated season (real random variance, so favorites do sometimes
     # lose) rather than a no-randomness "favorite always wins" run, which
     # produces unrealistic blowout records (16-1, 1-16) that don't match the
-    # summary's own mean_wins. Picked from the n_sims already run above: the
-    # single simulation whose per-team win total is closest (least squared
-    # error) to the aggregate summary's median_wins, i.e. the most "typical"
-    # of the realistic seasons already drawn, not a fabricated extreme.
+    # summary's own mean_wins.
+    #
+    # Picked from the n_sims already run above: the single simulation whose
+    # per-team win total is closest (least squared error) to the aggregate
+    # summary's median_wins, i.e. the most "typical" of the realistic seasons
+    # already drawn, not a fabricated extreme.
     target_wins = results.summary.set_index("team")["median_wins"]
     win_pivot = results.win_totals.pivot(index="sim", columns="team", values="wins")
     squared_error = ((win_pivot - target_wins) ** 2).sum(axis=1)

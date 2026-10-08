@@ -2,11 +2,12 @@
 """Builds one combined, human-readable prediction report from run_season_
 simulation.py's representative-simulation outputs: the real result of every
 regular-season game (week by week, with real upsets), the real playoff
-bracket, and the real final regular-season record, all in one CSV, all from
-the same one randomly-drawn realistic season. That keeps every section
-mutually consistent, unlike picking each game's aggregate favorite
-independently, which both looks unrealistic and can disagree with itself
-from one section to the next.
+bracket, and the real final regular-season record, all in one CSV, all
+from that same one randomly-drawn realistic season.
+
+Pulling every section from the same simulated season keeps them mutually
+consistent. Picking each game's aggregate favorite independently instead
+would look unrealistic and could disagree with itself section to section.
 
 Doesn't run any new simulation, just reformats
 data/processed/representative_season_games.csv, projected_playoff_bracket.csv,

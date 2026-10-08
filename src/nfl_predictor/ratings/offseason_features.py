@@ -1,10 +1,13 @@
-"""Preseason signals for each (season, team): did the head coach change,
-how does the incoming starting QB compare to who actually played last year,
-how much draft capital was added, how does the incoming RB/WR/TE room's
-prior production compare to what the team actually had last year, and the
-market's own preseason win total (covers 2007-2026). See
-ratings/adjustment.py for how these get combined into an Elo starting-
-rating adjustment.
+"""Preseason signals for each (season, team):
+  - did the head coach change
+  - how the incoming starting QB compares to who actually played last year
+  - how much draft capital was added
+  - how the incoming RB/WR/TE room's prior production compares to what the
+    team actually had last year
+  - the market's own preseason win total (covers 2007-2026)
+
+See ratings/adjustment.py for how these get combined into an Elo
+starting-rating adjustment.
 """
 
 from __future__ import annotations
@@ -62,11 +65,13 @@ def compute_qb_value_by_season(seasons: list[int]) -> pd.DataFrame:
     """season, passer_id, epa_per_dropback, n_dropbacks, epa_z. Computed
     directly from cached play-by-play, so it works for any season we've
     fetched pbp for, without depending on nfl_data_py's seasonal_data/
-    weekly_data lag. epa_z is a same-season z-score among qualified (>=
-    MIN_DROPBACKS) QBs that year. League-wide passing efficiency has drifted
-    a lot across eras (mean EPA/play went from -0.002 in 2006 to +0.078 in
-    2016 by our own numbers), so raw epa_per_dropback isn't comparable
-    across seasons that far apart; epa_z is."""
+    weekly_data lag.
+
+    epa_z is a same-season z-score among qualified (>= MIN_DROPBACKS) QBs
+    that year. League-wide passing efficiency has drifted a lot across eras
+    (mean EPA/play went from -0.002 in 2006 to +0.078 in 2016 by our own
+    numbers), so raw epa_per_dropback isn't comparable across seasons that
+    far apart; epa_z is."""
     frames = []
     for season in seasons:
         path = PBP_DIR / f"{season}.parquet"
@@ -101,13 +106,14 @@ def _replacement_level_by_season(qb_values: pd.DataFrame) -> dict[int, float]:
 
 
 def build_presumptive_starters(rosters: pd.DataFrame, qb_values: pd.DataFrame) -> pd.DataFrame:
-    """season, team, qb_id. For team-seasons with no real Week-1 starter
-    data yet (a season that hasn't been played), picks the roster's QB with
-    the most PRIOR-season dropback volume as a presumptive starter (0 if
-    none on file, e.g. a true rookie). This correctly picks up offseason
-    trades and signings, since rosters.parquet already reflects those --
-    spot-checked against a real 2026 trade and it had Myles Garrett listed
-    on LA the same day."""
+    """season, team, qb_id. For team-seasons with no real Week-1 starter data
+    yet (a season that hasn't been played), picks the roster's QB with the
+    most PRIOR-season dropback volume as a presumptive starter (0 if none on
+    file, e.g. a true rookie).
+
+    This correctly picks up offseason trades and signings, since
+    rosters.parquet already reflects those -- spot-checked against a real
+    2026 trade and it had Myles Garrett listed on LA the same day."""
     qb_rosters = rosters[rosters["position"] == "QB"][["season", "team", "player_id", "week"]]
     qb_rosters = qb_rosters.sort_values("week", na_position="first").drop_duplicates(
         subset=["season", "player_id"], keep="last"
@@ -214,10 +220,11 @@ def compute_skill_value_by_season(seasons: list[int]) -> pd.DataFrame:
     """season, player_id, skill_value: a SUM (not a rate) of EPA on plays
     where the player was the rusher, plus EPA on plays where they were the
     targeted receiver (completions and incompletions both, the standard
-    targeted-EPA convention). Summing rather than averaging lets a player's
-    value scale with usage/opportunity, not just efficiency, so a barely-
-    used camp body ends up near zero without needing to be filtered out
-    separately."""
+    targeted-EPA convention).
+
+    Summing rather than averaging lets a player's value scale with
+    usage/opportunity, not just efficiency, so a barely-used camp body ends
+    up near zero without needing to be filtered out separately."""
     frames = []
     for season in seasons:
         path = PBP_DIR / f"{season}.parquet"
@@ -435,21 +442,23 @@ def _with_secondary_pfr_ids(rosters: pd.DataFrame) -> pd.DataFrame:
 
 def compute_defensive_value_by_season(seasons: list[int]) -> pd.DataFrame:
     """season, pfr_id, defensive_value: a composite of era-normalized
-    (same-season z-scored) pass-rush production (prss, "pressures") and
-    turnovers (interceptions), plus coverage quality (rat, opponent passer
-    rating allowed when targeted, negated since lower is better and only
-    counted for defenders meeting MIN_COVERAGE_TARGETS, so a DT/DE targeted
-    once all season doesn't contribute pure noise). Z-scored against the
-    population of defenders who recorded any stats that season, not the
-    full bench-inclusive roster.
+    (same-season z-scored) pass-rush production (prss, "pressures"),
+    turnovers (interceptions), and coverage quality (rat, opponent passer
+    rating allowed when targeted, negated since a lower rat is better).
+    Z-scored against the population of defenders who recorded any stats
+    that season, not the full bench-inclusive roster.
+
+    The coverage term only counts for defenders meeting
+    MIN_COVERAGE_TARGETS, so a DT/DE targeted once all season doesn't
+    contribute pure noise.
 
     A player-season with fewer than MIN_DEFENSIVE_SNAPS total defensive
-    snaps gets forced to exactly 0 regardless of what the raw stats say,
-    same reasoning as the MIN_COVERAGE_TARGETS gate on `rat`: a thin sample
-    shouldn't be trusted either way. This also keeps build_defense_value_
-    deltas' team-level sums symmetric on both sides, instead of the prior
-    side (a full season's accumulated roster) outweighing the incoming
-    side (a single preseason snapshot) just from raw player count."""
+    snaps gets forced to exactly 0, for the same reason: a thin sample
+    shouldn't be trusted either way. This also keeps
+    build_defense_value_deltas' team-level sums symmetric, instead of the
+    prior side (a full season's accumulated roster) outweighing the
+    incoming side (a single preseason snapshot) just from raw player
+    count."""
     path = DATA_DIR / "pfr_def_stats.parquet"
     if not path.exists():
         return pd.DataFrame(columns=["season", "pfr_id", "defensive_value"])
@@ -496,14 +505,17 @@ def compute_defensive_value_by_season(seasons: list[int]) -> pd.DataFrame:
 def build_defense_value_deltas(rosters: pd.DataFrame) -> pd.DataFrame:
     """season, team, defense_value_delta: same incoming-vs-prior-team-value
     structure as build_skill_value_deltas, generalized to the defensive
-    front and coverage positions. Joined through rosters' pfr_id crosswalk
-    (PFR's def-stats table doesn't use the gsis player_id format everything
-    else does) in two passes, rosters.parquet's own pfr_id column first,
-    then player_ids.parquet as a fallback (see _with_secondary_pfr_ids).
-    Still incomplete: it skews toward practice-squad and inactive players
-    neither source has a PFR id for. No PFR defensive data before 2018;
-    build_offseason_features zero-fills those rows the same way
-    draft_capital_added already is."""
+    front and coverage positions.
+
+    Joined through rosters' pfr_id crosswalk (PFR's def-stats table doesn't
+    use the gsis player_id format everything else does), in two passes:
+    rosters.parquet's own pfr_id column first, then player_ids.parquet as a
+    fallback (see _with_secondary_pfr_ids). Still incomplete: it skews
+    toward practice-squad and inactive players neither source has a PFR id
+    for.
+
+    No PFR defensive data before 2018; build_offseason_features zero-fills
+    those rows the same way draft_capital_added already is."""
     rosters = _with_secondary_pfr_ids(rosters)
     defense_rosters = rosters[rosters["position"].isin(DEFENSE_POSITIONS) & rosters["pfr_id"].notna()][
         ["season", "team", "pfr_id", "week"]
@@ -549,12 +561,14 @@ def build_defense_value_deltas(rosters: pd.DataFrame) -> pd.DataFrame:
 
 def load_preseason_win_totals() -> pd.DataFrame:
     """season, team, preseason_win_total, from the manually-curated CSV
-    (data/manual/preseason_win_totals.csv). 2021 came from a sportsbook's
-    closing-line archive, 2026 from a FOX Sports preview article, and
-    2007-2020 plus 2022-2025 were backfilled from covers.com's
-    sportsoddshistory archive (public, no login required, allowed by
-    robots.txt), giving full 32-team coverage for every season 2007-2026.
-    Used as the 7th regression feature in adjustment.py's FEATURE_COLS."""
+    (data/manual/preseason_win_totals.csv).
+
+    Sourced per season: 2021 from a sportsbook's closing-line archive, 2026
+    from a FOX Sports preview article, and 2007-2020 plus 2022-2025
+    backfilled from covers.com's sportsoddshistory archive (public, no
+    login required, allowed by robots.txt), giving full 32-team coverage
+    for every season 2007-2026. Used as the 7th regression feature in
+    adjustment.py's FEATURE_COLS."""
     path = MANUAL_DIR / "preseason_win_totals.csv"
     if not path.exists():
         return pd.DataFrame(columns=["season", "team", "preseason_win_total"])

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""CLI entrypoint for Stage 1b: fits the offseason adjustment layer on top
-of the Stage 1 Elo engine and backtests it.
+"""CLI entrypoint for the offseason adjustment layer: fits it on top of the
+Elo engine and backtests it.
 
 Example:
     python scripts/run_offseason_adjustment.py --start-season 2021
@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    print("Fitting Elo (Stage 1) + offseason adjustment (Stage 1b)...")
+    print("Fitting Elo ratings + the offseason adjustment layer...")
     pipeline = fit_adjusted_elo_pipeline(args.start_season, regression_start_season=args.regression_start_season)
 
     print(f"\nFitted on {pipeline.full_model.n_rows} team-season transitions ({sorted(pipeline.loso_df['season'].unique())}):")
@@ -52,7 +52,7 @@ def main() -> None:
 
     b, a = pipeline.baseline_summary, pipeline.adjusted_summary
     print(f"\n{'':<20}{'Brier':>10}{'Log loss':>12}")
-    print(f"{'Elo (Stage 1)':<20}{b.elo_brier:>10.4f}{b.elo_log_loss:>12.4f}")
+    print(f"{'Elo':<20}{b.elo_brier:>10.4f}{b.elo_log_loss:>12.4f}")
     print(f"{'Elo + adjustment':<20}{a.elo_brier:>10.4f}{a.elo_log_loss:>12.4f}")
     print(f"{'Market':<20}{b.market_brier:>10.4f}{b.market_log_loss:>12.4f}")
     delta = b.elo_brier - a.elo_brier

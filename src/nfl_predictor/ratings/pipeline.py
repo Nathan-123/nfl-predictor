@@ -83,7 +83,7 @@ def run(
     hfa=None estimates home-field advantage from this same dataset's home
     win rate (see elo.hfa_from_home_win_rate) instead of hardcoding a
     constant. That estimate technically sees the full sample rather than
-    being purely out-of-sample, which is a fine simplification at this stage.
+    being purely out-of-sample, which is a fine simplification for now.
 
     season_adjustments: optional {(season, team): elo_points}, applied on
     top of the usual regress_to_mean shift at each season boundary. Fit in

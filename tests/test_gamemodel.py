@@ -1,4 +1,4 @@
-"""Tests for the Stage 2 game outcome model: rolling-EPA leakage safety,
+"""Tests for the XGBoost game outcome model: rolling-EPA leakage safety,
 QB-continuity-flag correctness (both on synthetic data), and an integration
 test of the real walk-forward backtest."""
 

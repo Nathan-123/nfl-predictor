@@ -1,8 +1,8 @@
-"""Single-elimination playoff bracket simulation, layered on top of Stage 3's
-regular-season machinery: same margin-sampling model, same
-elo.update_ratings, same RNG. Runs inside the same per-simulation loop so
-each simulated postseason starts from that exact simulation's own final
-ratings and seeding.
+"""Single-elimination playoff bracket simulation, layered on top of the
+regular-season simulation's machinery (season.py): same margin-sampling
+model, same elo.update_ratings, same RNG. Runs inside the same
+per-simulation loop so each simulated postseason starts from that exact
+simulation's own final ratings and seeding.
 """
 
 from __future__ import annotations

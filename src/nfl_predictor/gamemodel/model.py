@@ -1,7 +1,8 @@
 """XGBoost game outcome model: a classifier for home win probability and a
-regressor for point margin, both trained on the Stage 2 feature table and
-backtested with an expanding walk-forward-by-season split (it never trains
-on a season it's then evaluated on), same spirit as Stage 1b's LOSO CV.
+regressor for point margin, both trained on gamemodel.features' feature
+table and backtested with an expanding walk-forward-by-season split (it
+never trains on a season it's then evaluated on), same spirit as the
+offseason adjustment layer's leave-one-season-out cross-validation.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
-"""Per-game feature table for the Stage 2 game outcome model: rolling team
+"""Per-game feature table for the XGBoost game outcome model: rolling team
 EPA form (from play-by-play), in-season QB continuity, schedule/weather
-context, and the Stage 1b Elo rating diff.
+context, and the offseason-adjusted Elo rating diff.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def build_qb_continuity_flags(schedules: pd.DataFrame) -> pd.DataFrame:
     """game_id, team, qb_changed (1.0 if this game's starter differs from
     that team's immediately preceding game's starter, 0.0 if same, NaN for
     a team's first game in the dataset). An in-season signal, distinct from
-    Stage 1b's offseason QB value delta."""
+    the offseason adjustment layer's offseason QB value delta."""
     long = _week1_ordered_team_games(schedules).sort_values(["team", "season", "week"])
     prev_qb = long.groupby("team")["qb_id"].shift(1)
     long = long.assign(qb_changed=((long["qb_id"] != prev_qb) & prev_qb.notna()).astype(float))

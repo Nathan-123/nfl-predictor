@@ -34,6 +34,7 @@ ELO_WARMUP_SEASONS = 4
 
 # project_upcoming_season's fallback for a feature that's missing on the
 # upcoming season's row (e.g. preseason_win_total hasn't been sourced yet).
+#
 # 0.0 is the right neutral value for every other feature here, since
 # they're all deltas centered near zero, but 0.0 for preseason_win_total
 # would read as "expected to go 0-17," a strongly negative signal. 8.5,
@@ -149,27 +150,29 @@ class AdjustedEloPipeline:
 
 
 def fit_adjusted_elo_pipeline(start_season: int, regression_start_season: int | None = None) -> AdjustedEloPipeline:
-    """Runs the full Stage 1 -> Stage 1b pipeline in one call: baseline Elo,
-    offseason features, the LOSO-fit adjustment model, then an Elo re-run
-    with those adjustments applied. Every script that needs "the current
-    adjusted ratings" (run_offseason_adjustment.py, the season simulator)
-    goes through this, so they can't quietly drift out of sync with each
-    other.
+    """Runs the full Elo-plus-offseason-adjustment pipeline in one call:
+    baseline Elo, offseason features, the LOSO-fit adjustment model, then an
+    Elo re-run with those adjustments applied. Every script that needs "the
+    current adjusted ratings" (run_offseason_adjustment.py, the season
+    simulator) goes through this, so they can't quietly drift out of sync
+    with each other.
 
     start_season: the production Elo engine's start. Current ratings,
-    backtest numbers, and everything Stage 3 consumes are anchored here and
-    don't move with regression_start_season.
+    backtest numbers, and everything the season simulation consumes are
+    anchored here and don't move with regression_start_season.
 
     regression_start_season: if set earlier than start_season, the
     offseason-adjustment model gets fit on a wider window of season
-    transitions (more independent trials to learn from) via a second,
-    separate Elo run used only to generate (season, team, rating_change)
-    targets (see ratings.pipeline.run). The first ELO_WARMUP_SEASONS of that
-    wider run get dropped before fitting, since ratings need time to move
-    off the synthetic 1500 start. The resulting season_adjustments dict only
-    ever gets looked up for (season, team) keys the production run's season
-    boundaries actually hit, so the extra pre-start_season entries in it are
-    harmless.
+    transitions (more independent trials to learn from), via a second,
+    separate Elo pass used only to generate (season, team, rating_change)
+    training targets over that wider window (see ratings.pipeline.run).
+
+    The first ELO_WARMUP_SEASONS of that wider pass get dropped before
+    fitting, since ratings need time to move off the synthetic 1500 starting
+    point. The resulting season_adjustments dict ends up with some entries
+    for seasons before start_season; those are harmless, since the
+    production run only ever looks up the (season, team) keys its own season
+    boundaries actually hit.
     """
     from nfl_predictor.ratings.offseason_features import build_offseason_features
     from nfl_predictor.ratings.pipeline import run as run_elo

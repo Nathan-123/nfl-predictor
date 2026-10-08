@@ -1,8 +1,8 @@
 """Monte Carlo season simulation, driven by the Elo+adjustment engine rather
-than the Stage 2 GBM: a season sim is recursive (each simulated outcome
-feeds the next game's pregame ratings), which is exactly what Elo is built
-for, while the GBM's best features (rolling EPA, in-season QB continuity)
-only exist for real, already-played games.
+than the XGBoost game model: a season sim is recursive (each simulated
+outcome feeds the next game's pregame ratings), which is exactly what Elo is
+built for, while the XGBoost model's best features (rolling EPA, in-season
+QB continuity) only exist for real, already-played games.
 """
 
 from __future__ import annotations
@@ -115,9 +115,10 @@ def simulate_one_season(
             # of 2021+ games by our own count), but naively rounding a
             # continuous normal draw puts about 3% of its mass at exactly 0
             # for an even matchup, roughly 10x too often, since the model
-            # has no separate notion of "went to overtime." Cheap fix:
-            # redraw once, as if that were the overtime period, and only
-            # call it a tie if that also lands on 0.
+            # has no separate notion of "went to overtime."
+            #
+            # Cheap fix: redraw once, as if that were the overtime period,
+            # and only call it a tie if that also lands on 0.
             margin = int(round(rng.normal(predicted_margin, margin_std)))
         home_score, away_score = margin_to_scores(margin)
 
@@ -212,14 +213,17 @@ def run_simulations(
 ) -> SimulationResults:
     """Runs n_sims full seasons plus playoffs and returns the aggregate
     results (see SimulationResults). Also builds two per-game/per-slot
-    prediction tables from the same n_sims runs: regular-season games have a
-    fixed, known matchup every sim (Week 5 KC @ DEN is always Week 5 KC @
-    DEN), so they're aggregated by game_id directly. Playoff games don't,
-    since which two teams meet in, say, the AFC Wild Card round depends on
-    how the regular season went in that specific sim. Those get aggregated
-    by structural bracket slot instead (conference + round + position, e.g.
-    "the #2 seed's Wild Card game"), which every sim fills exactly once
-    regardless of who's in it."""
+    prediction tables from those same n_sims runs.
+
+    Regular-season games have a fixed, known matchup every sim (Week 5 KC @
+    DEN is always Week 5 KC @ DEN), so they're aggregated by game_id
+    directly.
+
+    Playoff games don't: which two teams meet in, say, the AFC Wild Card
+    round depends on how the regular season went in that specific sim. So
+    those get aggregated by structural bracket slot instead (conference +
+    round + position, e.g. "the #2 seed's Wild Card game"), which every sim
+    fills exactly once regardless of who's in it."""
     from nfl_predictor.simulation.playoffs import simulate_playoffs_detailed
 
     rng = np.random.default_rng(seed)

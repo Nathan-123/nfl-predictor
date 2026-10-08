@@ -1,4 +1,4 @@
-"""Tests for the Stage 1b offseason adjustment layer: coaching-change
+"""Tests for the offseason adjustment layer: coaching-change
 detection, the draft pick-value curve, QB value-delta computation (on
 synthetic data), and an integration test against real cached history."""
 
